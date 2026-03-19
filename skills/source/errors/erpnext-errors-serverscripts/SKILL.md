@@ -1,6 +1,15 @@
 ---
 name: erpnext-errors-serverscripts
-description: "Error handling patterns for ERPNext Server Scripts. Use when handling sandbox errors, frappe.throw usage, validation in server scripts, and debugging. V14/V15/V16 compatible. Triggers: server script error, frappe.throw, sandbox error, validation error, debugging server script."
+description: >
+  Use when handling errors in ERPNext Server Scripts. Covers sandbox errors,
+  frappe.throw usage, validation in server scripts, and debugging for
+  v14/v15/v16. Keywords: server script error, frappe.throw, sandbox error,
+  validation error, debugging server script.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Server Scripts - Error Handling

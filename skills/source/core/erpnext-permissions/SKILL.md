@@ -1,10 +1,16 @@
 ---
 name: erpnext-permissions
-description: Complete guide for Frappe/ERPNext permission system - roles, user permissions, perm levels, data masking, and permission hooks
-version: 1.1.0
-author: OpenAEC Foundation
-tags: [erpnext, frappe, permissions, security, roles, access-control, data-masking]
-frameworks: [frappe-14, frappe-15, frappe-16]
+description: >
+  Use when implementing the Frappe/ERPNext permission system. Covers roles,
+  user permissions, perm levels, data masking, and permission hooks for
+  v14/v15/v16. Prevents common access control mistakes and security issues.
+  Keywords: permissions, roles, user permissions, perm levels, data masking,
+  access control, security, has_permission.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Permissions Skill

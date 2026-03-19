@@ -1,6 +1,15 @@
 ---
 name: erpnext-errors-hooks
-description: "Error handling patterns for ERPNext hooks.py configurations. Use when debugging doc_events errors, scheduler failures, boot session issues, and app initialization problems. V14/V15/V16 compatible. Triggers: hooks.py error, doc_events error, scheduler error, boot session error, app initialization error."
+description: >
+  Use when debugging hooks.py errors in ERPNext/Frappe. Covers doc_events
+  errors, scheduler failures, boot session issues, and app initialization
+  problems for v14/v15/v16. Keywords: hooks.py error, doc_events error,
+  scheduler error, boot session error, app initialization error.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Hooks - Error Handling

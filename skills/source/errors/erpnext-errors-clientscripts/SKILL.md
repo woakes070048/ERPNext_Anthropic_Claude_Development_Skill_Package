@@ -1,6 +1,16 @@
 ---
 name: erpnext-errors-clientscripts
-description: "Error handling patterns for ERPNext/Frappe Client Scripts. Use when implementing try/catch, user feedback, server call error handling, validation errors, and debugging. Covers async error handling, graceful degradation, and user-friendly error messages. V14/V15/V16 compatible. Triggers: client script error, try catch, frappe.throw, error handling, async error, validation error."
+description: >
+  Use when handling errors in ERPNext/Frappe Client Scripts. Covers
+  try/catch patterns, user feedback, server call error handling, validation
+  errors, async error handling, and debugging for v14/v15/v16. Keywords:
+  client script error, try catch, frappe.throw, async error, validation
+  error, error handling.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Client Scripts - Error Handling

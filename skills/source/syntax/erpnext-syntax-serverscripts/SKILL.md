@@ -1,6 +1,17 @@
 ---
 name: erpnext-syntax-serverscripts
-description: Complete syntax reference for Frappe Server Scripts. Use this skill when Claude needs to write Python code for Server Scripts in ERPNext/Frappe, including Document Events, API endpoints, Scheduler Events, and Permission Queries. Covers sandbox limitations, available frappe.* methods, event name mapping, and correct syntax for v14/v15/v16.
+description: >
+  Use when writing Python code for ERPNext/Frappe Server Scripts including
+  Document Events, API endpoints, Scheduler Events, and Permission Queries.
+  Prevents the #1 AI mistake: using import statements in Server Scripts
+  (sandbox blocks ALL imports). Covers frappe.* methods, event name mapping,
+  and correct v14/v15/v16 syntax. Keywords: Server Script, frappe, ERPNext,
+  sandbox, import, doc event, validate, on_submit, before_save.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Server Scripts Syntax

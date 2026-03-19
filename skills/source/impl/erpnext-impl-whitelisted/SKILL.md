@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-whitelisted
-description: "Implementation workflows and decision trees for Frappe Whitelisted Methods (REST APIs). Use when determining HOW to implement API endpoints: public vs authenticated, permission patterns, error handling, response formats, client integration. Triggers: how do I create API, build REST endpoint, frappe.call pattern, API permission check, guest API, secure endpoint."
+description: >
+  Use when determining HOW to implement Frappe Whitelisted Methods (REST
+  APIs): public vs authenticated endpoints, permission patterns, error
+  handling, response formats, client integration. Keywords: how to create
+  API, build REST endpoint, frappe.call pattern, API permission check,
+  guest API, secure endpoint.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Whitelisted Methods - Implementation

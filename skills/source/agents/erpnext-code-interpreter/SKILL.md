@@ -1,6 +1,16 @@
 ---
 name: erpnext-code-interpreter
-description: "Intelligent agent for interpreting vague ERPNext development requests and producing concrete technical specifications. Use when receiving unclear requirements like 'make invoice auto-calculate', 'add approval workflow', 'sync with external system'. Triggers: user gives vague requirement, need to clarify scope, translate business need to technical spec, determine which ERPNext mechanisms to use, create implementation plan."
+description: >
+  Use when receiving vague or unclear ERPNext development requests that need
+  interpretation. Transforms requirements like 'make invoice auto-calculate'
+  or 'add approval workflow' into concrete technical specifications.
+  Determines which ERPNext mechanisms to use. Keywords: vague requirement,
+  clarify scope, translate business need, technical spec, implementation plan.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Code Interpreter Agent

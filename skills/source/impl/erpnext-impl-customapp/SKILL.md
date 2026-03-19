@@ -1,6 +1,15 @@
 ---
 name: erpnext-impl-customapp
-description: "Implementation workflows for building Frappe/ERPNext custom apps. Covers app structure, module creation, doctype design, fixtures, patches, and deployment. V14/V15/V16 compatible. Triggers: create custom app, new frappe app, bench new-app, app structure, module creation, doctype creation, fixtures, patches."
+description: >
+  Use when building Frappe/ERPNext custom apps. Covers app structure,
+  module creation, doctype design, fixtures, patches, and deployment
+  workflows for v14/v15/v16. Keywords: create custom app, new frappe app,
+  bench new-app, app structure, module creation, doctype creation, fixtures.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Custom App - Implementation

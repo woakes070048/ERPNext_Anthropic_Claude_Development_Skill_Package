@@ -1,6 +1,16 @@
 ---
 name: erpnext-errors-api
-description: "Error handling patterns for ERPNext/Frappe API development (v14/v15/v16). Covers whitelisted method errors, REST API errors, client-side handling, external integrations, and webhooks. Triggers: API error, whitelisted method error, frappe.call error, REST API error, webhook error, external API error, HTTP status codes."
+description: >
+  Use when handling API errors in ERPNext/Frappe v14/v15/v16. Covers
+  whitelisted method errors, REST API errors, client-side error handling,
+  external integrations, and webhooks. Keywords: API error, whitelisted
+  method error, frappe.call error, REST API error, webhook error, HTTP
+  status codes.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext API Error Handling

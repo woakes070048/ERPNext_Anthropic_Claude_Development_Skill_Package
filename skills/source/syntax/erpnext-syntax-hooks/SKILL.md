@@ -1,6 +1,16 @@
 ---
 name: erpnext-syntax-hooks
-description: "Deterministic syntax for Frappe hooks.py configuration. Use when Claude needs to configure app events, scheduler tasks, document events, fixtures, boot session, jenv customization, or website routing. Covers v14/v15/v16 including extend_doctype_class. Triggers: hooks.py, doc_events, scheduler_events, fixtures, app_include_js, override_whitelisted_methods."
+description: >
+  Use when configuring Frappe hooks.py for app events, scheduler tasks,
+  document events, fixtures, boot session, jenv customization, or website
+  routing. Covers v14/v15/v16 including extend_doctype_class. Keywords:
+  hooks.py, doc_events, scheduler_events, fixtures, app_include_js,
+  override_whitelisted_methods, extend_doctype_class.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Syntax: Hooks (hooks.py)

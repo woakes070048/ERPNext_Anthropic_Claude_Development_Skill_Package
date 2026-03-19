@@ -1,6 +1,15 @@
 ---
 name: erpnext-code-validator
-description: "Intelligent agent for validating ERPNext/Frappe code against best practices and common pitfalls. Use when reviewing generated code, checking for errors before deployment, or validating code quality. Triggers: review this code, check my script, validate before deployment, is this correct, find bugs, check for errors, will this work."
+description: >
+  Use when reviewing or validating ERPNext/Frappe code against best practices
+  and common pitfalls. Checks generated code before deployment, validates
+  code quality, and catches errors. Keywords: review code, check script,
+  validate deployment, find bugs, check errors, code quality.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Code Validator Agent

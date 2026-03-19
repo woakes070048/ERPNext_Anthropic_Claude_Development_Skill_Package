@@ -1,11 +1,16 @@
 ---
 name: erpnext-syntax-jinja
-version: 1.0.0
-description: Deterministic Jinja template syntax for ERPNext/Frappe Print Formats, Email Templates, and Portal Pages
-author: OpenAEC Foundation
-tags: [erpnext, frappe, jinja, templates, print-formats, email-templates, portal-pages]
-languages: [en]
-frappe_versions: [v14, v15, v16]
+description: >
+  Use when writing Jinja templates for ERPNext/Frappe Print Formats, Email
+  Templates, and Portal Pages. Covers template syntax, context variables,
+  filters, macros, and v16 Chrome PDF rendering. Prevents common mistakes
+  with doc context and child table iteration. Keywords: Jinja, print format,
+  email template, portal page, template syntax, PDF, v14-v16.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Jinja Templates Syntax Skill

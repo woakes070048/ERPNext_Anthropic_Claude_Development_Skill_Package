@@ -1,6 +1,16 @@
 ---
 name: erpnext-errors-controllers
-description: "Error handling patterns for ERPNext Document Controllers. Use when implementing try/except, validation errors, permission errors, and transaction management. Covers rollback patterns, error logging, and user feedback. V14/V15/V16 compatible. Triggers: controller error, try except catch, ValidationError, PermissionError, rollback, error handling."
+description: >
+  Use when handling errors in ERPNext Document Controllers. Covers
+  try/except patterns, validation errors, permission errors, transaction
+  management, rollback patterns, and error logging for v14/v15/v16.
+  Keywords: controller error, try except, ValidationError, PermissionError,
+  rollback, error handling.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Controllers - Error Handling

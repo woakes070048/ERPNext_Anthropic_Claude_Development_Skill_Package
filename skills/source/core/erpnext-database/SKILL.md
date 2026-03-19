@@ -1,17 +1,16 @@
 ---
 name: erpnext-database
-version: 1.0.0
-description: Database operations and ORM patterns for ERPNext/Frappe v14-v16
-author: OpenAEC-Foundation
-triggers:
-  - frappe database
-  - frappe.db
-  - frappe.get_doc
-  - database query
-  - SQL frappe
-  - ORM frappe
-  - caching frappe
-  - database performance
+description: >
+  Use when performing database operations in ERPNext/Frappe v14-v16. Covers
+  frappe.db methods, ORM patterns (frappe.get_doc, frappe.get_list), raw SQL,
+  caching patterns, and performance optimization. Prevents common mistakes
+  with database transactions and query building. Keywords: frappe.db,
+  frappe.get_doc, database query, SQL, ORM, caching, database performance.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Database Operations

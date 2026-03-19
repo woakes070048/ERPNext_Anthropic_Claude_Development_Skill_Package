@@ -1,6 +1,16 @@
 ---
 name: erpnext-errors-permissions
-description: "Error handling patterns for ERPNext/Frappe permissions and access control. Use when handling PermissionError, has_permission failures, role issues, and document access problems. V14/V15/V16 compatible. Triggers: permission error, access denied, PermissionError, role error, has_permission failed, document access error."
+description: >
+  Use when handling permission errors in ERPNext/Frappe. Covers
+  PermissionError, has_permission failures, role issues, and document
+  access problems for v14/v15/v16. Keywords: permission error, access
+  denied, PermissionError, role error, has_permission failed, document
+  access error.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Permissions - Error Handling

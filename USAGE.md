@@ -105,6 +105,18 @@ Ask Claude:
 You: "What ERPNext skills do you have access to?"
 ```
 
+## Global Installation (Claude Code CLI)
+
+Copy all skills to your global skills directory so they're available in every project:
+
+```bash
+cp -r skills/source/* ~/.claude/skills/
+```
+
+The skills use progressive disclosure: at startup Claude only loads the name and description (~100 tokens per skill). Full instructions are loaded only when a skill is relevant to your request.
+
+28 skills x ~100 tokens = ~2,800 tokens startup overhead. This is negligible on a 200k token context window.
+
 ## Critical: Server Script Sandbox
 
 The most important thing to know about ERPNext development:
@@ -130,4 +142,4 @@ This is the #1 cause of AI-generated ERPNext code failures. All skills in this p
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+LGPL-3.0 License - See [LICENSE](LICENSE.md) for details.

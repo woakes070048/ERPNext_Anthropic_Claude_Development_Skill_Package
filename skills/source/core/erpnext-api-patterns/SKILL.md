@@ -1,6 +1,16 @@
 ---
 name: erpnext-api-patterns
-description: "Complete guide for ERPNext/Frappe API integrations (v14/v15/v16) including REST API, RPC API, authentication, webhooks, and rate limiting. Use when code is needed for external API calls to ERPNext, designing API endpoints, configuring webhooks, implementing authentication (token/OAuth2/session). Triggers: API integration, REST endpoint, webhook, token authentication, OAuth, frappe.call, external connection, API response, rate limiting."
+description: >
+  Use when building ERPNext/Frappe API integrations (v14/v15/v16) including
+  REST API, RPC API, authentication, webhooks, and rate limiting. Covers
+  external API calls, endpoint design, token/OAuth2/session authentication.
+  Keywords: API integration, REST endpoint, webhook, token authentication,
+  OAuth, frappe.call, external connection, rate limiting.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext API Patterns

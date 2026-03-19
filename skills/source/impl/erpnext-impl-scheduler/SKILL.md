@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-scheduler
-description: "Implementation workflows for Frappe scheduled tasks and background jobs (v14/v15/v16). Covers hooks.py scheduler_events, frappe.enqueue, queue selection, job deduplication, and error handling. Triggers: how to schedule task, background job, cron job, async processing, queue selection, job deduplication, scheduler implementation."
+description: >
+  Use when implementing scheduled tasks and background jobs in Frappe
+  v14/v15/v16. Covers hooks.py scheduler_events, frappe.enqueue, queue
+  selection, job deduplication, and error handling. Keywords: how to
+  schedule task, background job, cron job, async processing, queue
+  selection, job deduplication, scheduler implementation.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Scheduler - Implementation

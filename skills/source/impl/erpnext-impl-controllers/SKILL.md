@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-controllers
-description: "Implementation workflows and decision trees for Frappe Document Controllers. Use when determining HOW to implement server-side DocType logic: lifecycle hooks, validation patterns, autoname, submittable workflows, controller override. Triggers: how do I implement controller, which hook to use, validate vs on_update, override controller, submittable document, autoname pattern, flags system."
+description: >
+  Use when determining HOW to implement server-side DocType logic with
+  Frappe Document Controllers: lifecycle hooks, validation patterns,
+  autoname, submittable workflows, controller override. Keywords: how to
+  implement controller, which hook to use, validate vs on_update, override
+  controller, submittable document, autoname pattern, flags system.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Controllers - Implementation

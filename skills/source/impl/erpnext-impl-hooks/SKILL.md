@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-hooks
-description: "Implementation workflows and decision trees for Frappe hooks.py configuration. Use when determining HOW to implement doc_events, scheduler_events, override hooks, permission hooks, extend_bootinfo, fixtures, and asset includes. Covers V16 extend_doctype_class. Triggers: how do I hook, which hook to use, doc_events vs controller, override doctype, extend doctype class, permission hook, scheduler job, cron task, fixtures export."
+description: >
+  Use when determining HOW to implement hooks.py configurations in Frappe:
+  doc_events, scheduler_events, override hooks, permission hooks,
+  extend_bootinfo, fixtures, asset includes, and V16 extend_doctype_class.
+  Keywords: how to hook, which hook to use, doc_events vs controller,
+  override doctype, extend doctype class, permission hook, scheduler job.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Hooks - Implementation

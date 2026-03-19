@@ -1,6 +1,16 @@
 ---
 name: erpnext-syntax-scheduler
-description: Scheduler and background jobs syntax for Frappe/ERPNext v14/v15/v16. Use for scheduler_events in hooks.py, frappe.enqueue() for async jobs, queue configuration, job deduplication, error handling, and monitoring. Triggers on questions about scheduled tasks, background processing, cron jobs, RQ workers, job queues, async tasks.
+description: >
+  Use when configuring scheduler events and background jobs in Frappe/ERPNext
+  v14/v15/v16. Covers scheduler_events in hooks.py, frappe.enqueue() for
+  async jobs, queue configuration, job deduplication, error handling, and
+  monitoring. Keywords: scheduler, background job, cron, RQ worker, job
+  queue, async task, frappe.enqueue, scheduled task.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Syntax: Scheduler & Background Jobs

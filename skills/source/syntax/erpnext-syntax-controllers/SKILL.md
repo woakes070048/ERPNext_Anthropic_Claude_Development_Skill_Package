@@ -1,6 +1,16 @@
 ---
 name: erpnext-syntax-controllers
-description: "Deterministic syntax for Frappe Document Controllers (Python server-side). Use when Claude needs to generate code for DocType controllers, lifecycle hooks (validate, on_update, on_submit, etc.), document methods, controller override, submittable documents, or when questions concern controller structure, naming conventions, autoname patterns, UUID naming (v16), or the flags system. Triggers: document controller, controller hook, validate, on_update, on_submit, autoname, naming series, UUID naming, flags system."
+description: >
+  Use when writing Python Document Controllers for ERPNext/Frappe DocTypes.
+  Covers lifecycle hooks (validate, on_update, on_submit), controller
+  override, submittable documents, autoname patterns, UUID naming (v16),
+  and the flags system. Keywords: document controller, lifecycle hook,
+  validate, on_update, on_submit, autoname, naming series, flags, v14-v16.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Syntax: Document Controllers

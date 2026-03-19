@@ -1,6 +1,16 @@
 ---
 name: erpnext-errors-database
-description: "Error handling patterns for ERPNext/Frappe database operations. Use when handling DoesNotExistError, DuplicateEntryError, transaction failures, and query errors. Covers retry patterns and data integrity. V14/V15/V16 compatible. Triggers: database error, DoesNotExistError, DuplicateEntryError, transaction failed, query error."
+description: >
+  Use when handling database errors in ERPNext/Frappe. Covers
+  DoesNotExistError, DuplicateEntryError, transaction failures, query
+  errors, retry patterns, and data integrity for v14/v15/v16. Keywords:
+  database error, DoesNotExistError, DuplicateEntryError, transaction
+  failed, query error.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Database - Error Handling

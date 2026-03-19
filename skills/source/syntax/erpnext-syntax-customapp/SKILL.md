@@ -1,11 +1,16 @@
 ---
 name: erpnext-syntax-customapp
-version: 1.0.0
-description: "Deterministic syntax for building Frappe custom apps including app structure, pyproject.toml, modules, patches and fixtures"
-author: OpenAEC Foundation
-tags: [erpnext, frappe, custom-app, pyproject, patches, fixtures, modules]
-languages: [en]
-frappe_versions: [v14, v15, v16]
+description: >
+  Use when building Frappe custom apps from scratch. Covers app structure,
+  pyproject.toml configuration, module creation, patches, and fixtures
+  for v14/v15/v16. Prevents common mistakes with app scaffolding and
+  module organization. Keywords: custom app, bench new-app, pyproject.toml,
+  patches, fixtures, modules, app structure.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Custom App Syntax Skill

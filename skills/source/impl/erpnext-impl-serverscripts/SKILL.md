@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-serverscripts
-description: "Implementation workflows and decision trees for ERPNext Server Scripts. Use when determining HOW to implement server-side features: document validation, automated calculations, API endpoints, scheduled tasks, permission filtering. Triggers: how do I implement server-side, when to use server script vs controller, which script type, build custom API, automate validation, schedule task, filter documents per user."
+description: >
+  Use when determining HOW to implement server-side features in ERPNext:
+  document validation, automated calculations, API endpoints, scheduled
+  tasks, permission filtering. Helps choose between server script vs
+  controller. Keywords: how to implement server-side, which script type,
+  build custom API, automate validation, schedule task, filter documents.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Server Scripts - Implementation

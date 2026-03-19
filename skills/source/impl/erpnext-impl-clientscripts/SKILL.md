@@ -1,6 +1,15 @@
 ---
 name: erpnext-impl-clientscripts
-description: "Implementation workflows and decision trees for ERPNext Client Scripts. Use when determining HOW to implement client-side features: form validations, dynamic UI, server integration, child table logic. Triggers: how do I implement, when to use, which approach, client script workflow, build form logic, make UI dynamic, calculate fields."
+description: >
+  Use when determining HOW to implement client-side features in ERPNext:
+  form validations, dynamic UI, server integration, child table logic.
+  Decision trees for choosing the right approach. Keywords: how do I
+  implement, client script workflow, form logic, dynamic UI, calculate fields.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Client Scripts - Implementation (EN)

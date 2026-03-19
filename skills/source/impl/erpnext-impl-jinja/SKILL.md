@@ -1,6 +1,16 @@
 ---
 name: erpnext-impl-jinja
-description: "Implementation workflows and decision trees for Jinja templates in ERPNext/Frappe. Use when determining HOW to implement Print Formats, Email Templates, Portal Pages, or custom Jinja methods. Covers template type selection, context variables, styling, and V16 Chrome PDF rendering. Triggers: create print format, email template, portal page, custom jinja filter, print format styling, pdf template, invoice template, report template."
+description: >
+  Use when determining HOW to implement Jinja templates in ERPNext/Frappe:
+  Print Formats, Email Templates, Portal Pages, custom Jinja methods.
+  Covers template type selection, context variables, styling, and V16
+  Chrome PDF rendering. Keywords: create print format, email template,
+  portal page, pdf template, invoice template, report template.
+license: LGPL-3.0
+compatibility: "Claude Code, Claude.ai Projects, Claude API. ERPNext v14-v16."
+metadata:
+  author: OpenAEC-Foundation
+  version: "1.0"
 ---
 
 # ERPNext Jinja Templates - Implementation
