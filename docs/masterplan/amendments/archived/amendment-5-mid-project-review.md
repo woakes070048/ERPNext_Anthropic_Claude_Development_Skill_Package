@@ -68,7 +68,7 @@ ERPNext_Anthropic_Claude_Development_Skill_Package/
 │
 ├── README.md                    # Project overview (NIET in skill folders)
 ├── ROADMAP.md                   # Single source of truth voor status
-├── LESSONS_LEARNED.md           # Geleerde lessen
+├── LESSONS.md           # Geleerde lessen
 ├── WAY_OF_WORK.md              # Methodologie
 │
 ├── docs/
@@ -219,7 +219,7 @@ STAP 7: Push naar GitHub
 
 ## Deel 6: Actieplan
 
-1. ✅ LESSONS_LEARNED.md uitgebreid
+1. ✅ LESSONS.md uitgebreid
 2. ✅ Amendment 5 v2 geschreven
 3. ⏳ Push Amendment 5 v2 naar GitHub
 4. ⏳ Besluit: Start migratie?

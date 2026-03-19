@@ -6,7 +6,7 @@
   <a href="#-installation"><img src="https://img.shields.io/badge/Claude_Code-Ready-27ca40?style=for-the-badge" alt="Claude Code Ready"></a>
   <a href="#-version-compatibility"><img src="https://img.shields.io/badge/ERPNext-v14_|_v15_|_v16-0089FF?style=for-the-badge" alt="ERPNext Versions"></a>
   <a href="https://agentskills.org"><img src="https://img.shields.io/badge/Agent_Skills-Standard-DA7756?style=for-the-badge" alt="Agent Skills Standard"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=for-the-badge" alt="MIT License"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-LGPL--3.0-lightgrey?style=for-the-badge" alt="LGPL-3.0 License"></a>
 </p>
 
 <p align="center">
@@ -91,7 +91,7 @@ cp -r ERPNext_Anthropic_Claude_Development_Skill_Package/skills/source/* ~/.clau
 | **[INDEX.md](INDEX.md)** | Complete skill catalog with descriptions |
 | **[USAGE.md](USAGE.md)** | Platform-specific installation guides |
 | **[WAY_OF_WORK.md](WAY_OF_WORK.md)** | 7-phase development methodology |
-| **[LESSONS_LEARNED.md](LESSONS_LEARNED.md)** | Technical discoveries and gotchas |
+| **[LESSONS.md](LESSONS.md)** | Technical discoveries and gotchas |
 
 ---
 
@@ -108,7 +108,7 @@ See [`WAY_OF_WORK.md`](WAY_OF_WORK.md) for the methodology we used to build thes
 
 ## 📄 License
 
-MIT — See [LICENSE](LICENSE) for details.
+LGPL-3.0 — See [LICENSE.md](LICENSE.md) for details.
 
 ---
 

@@ -37,7 +37,7 @@ ERPNext_Anthropic_Claude_Development_Skill_Package/
 │
 ├── README.md                    # Project overview
 ├── ROADMAP.md                   # Single source of truth
-├── LESSONS_LEARNED.md           # Geleerde lessen
+├── LESSONS.md           # Geleerde lessen
 ├── WAY_OF_WORK.md              # Methodologie
 │
 ├── docs/

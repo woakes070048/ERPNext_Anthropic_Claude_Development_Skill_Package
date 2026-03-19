@@ -17,7 +17,7 @@ De directorystructuur gebruikt `skills/source/` terwijl het Blender package `ski
 - YAML frontmatter met `name` en `description` → progressive disclosure is actief
 - SKILL.md body's zijn compact → progressive disclosure werkt correct
 - Inhoud is deterministisch en van hoge kwaliteit (WRONG→CORRECT patronen)
-- Documentatie (WAY_OF_WORK, LESSONS_LEARNED, INDEX) is uitstekend
+- Documentatie (WAY_OF_WORK, LESSONS, INDEX) is uitstekend
 
 ## Verbeterpunten
 

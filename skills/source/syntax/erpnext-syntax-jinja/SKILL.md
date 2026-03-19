@@ -418,4 +418,4 @@ Most print formats work unchanged. Update if using:
 
 - `erpnext-syntax-hooks` - For jenv configuration in hooks.py
 - `erpnext-impl-jinja` - For implementation patterns
-- `erpnext-errors-jinja` - For error handling
+- `erpnext-errors-serverscripts` - For server-side error handling

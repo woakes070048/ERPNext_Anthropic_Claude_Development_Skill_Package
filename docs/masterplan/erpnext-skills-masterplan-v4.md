@@ -22,7 +22,7 @@
 |----------|------|---------|
 | ROADMAP.md | Single source of truth voor status | `/ROADMAP.md` |
 | WAY_OF_WORK.md | Methodologie en workflows | `/WAY_OF_WORK.md` |
-| LESSONS_LEARNED.md | Technische en proces lessen | `/LESSONS_LEARNED.md` |
+| LESSONS.md | Technische en proces lessen | `/LESSONS.md` |
 | DEPENDENCIES.md | Skill afhankelijkheden | `/docs/DEPENDENCIES.md` |
 | Amendment 5 | Mid-project review | `/docs/masterplan/amendments/archived/` |
 | Amendment 6 | Engels-only beslissing | `/docs/masterplan/amendments/archived/` |
@@ -39,7 +39,7 @@ Een complete, modulaire verzameling van **28 deterministische skills** die Claud
 |----------|--------------|------------|
 | **Engels-only** | Skills zijn instructies voor Claude, niet voor eindgebruikers | Amendment 6 |
 | **Research-first** | Geen skill zonder gedegen onderzoek | WAY_OF_WORK.md §5 |
-| **Determinisme** | Alleen geverifieerde feiten, geen aannames | LESSONS_LEARNED.md §7 |
+| **Determinisme** | Alleen geverifieerde feiten, geen aannames | LESSONS.md §7 |
 | **Versie-expliciet** | Alle code gemarkeerd met v14/v15/v16 | Masterplan v3 |
 | **One-shot kwaliteit** | Direct definitieve kwaliteit | WAY_OF_WORK.md §6 |
 | **Test-verified** | Skills getest in daadwerkelijk gebruik | **NIEUW in v4** |
@@ -125,7 +125,7 @@ Een complete, modulaire verzameling van **28 deterministische skills** die Claud
 
 ### Geleerde Les: "100% Compleet" ≠ "100% Kwaliteit"
 
-> **Toe te voegen aan LESSONS_LEARNED.md Sectie 12**
+> **Toe te voegen aan LESSONS.md Sectie 12**
 >
 > Skills kunnen structureel compleet zijn maar functioneel niet getest.
 > Het verschil tussen "we hebben het gemaakt" en "het werkt" is cruciaal.
@@ -153,7 +153,7 @@ Een complete, modulaire verzameling van **28 deterministische skills** die Claud
 | Validatie met quick_validate.py | 🔴 | 8.3 |
 | Validatie met package_skill.py | 🔴 | 8.3 |
 | Skills testen in Claude | 🔴 | 8.3 |
-| LESSONS_LEARNED updaten | 🟡 | 8.1 |
+| LESSONS updaten | 🟡 | 8.1 |
 | Project instructies updaten | 🟡 | 8.7 |
 
 ---
@@ -165,11 +165,11 @@ Een complete, modulaire verzameling van **28 deterministische skills** die Claud
 **Doel**: Vastleggen wat we geleerd hebben en documentatie actualiseren.
 
 **Deliverables**:
-- [ ] LESSONS_LEARNED.md uitbreiden met secties 12-14
+- [ ] LESSONS.md uitbreiden met secties 12-14
 - [ ] WAY_OF_WORK.md reviewen op actualiteit
 - [ ] Dit masterplan (v4) afronden en pushen
 
-**Nieuwe LESSONS_LEARNED secties**:
+**Nieuwe LESSONS secties**:
 
 ```markdown
 ## Sectie 12: "Compleet" vs "Kwaliteit"
@@ -189,7 +189,7 @@ Een complete, modulaire verzameling van **28 deterministische skills** die Claud
 ```
 
 **Referenties**:
-- LESSONS_LEARNED.md huidige secties 1-11
+- LESSONS.md huidige secties 1-11
 - WAY_OF_WORK.md fase 7 (validation)
 - Sessie 21 reflectie notities
 
@@ -350,7 +350,7 @@ python package_skill.py skills/source/[cat]/[skill] skills/packaged/
 **Deliverable**: Test rapport met pass/fail per skill
 
 **Referenties**:
-- LESSONS_LEARNED.md §1.1 (Server Script sandbox)
+- LESSONS.md §1.1 (Server Script sandbox)
 - Amendment 5 (tooling requirements)
 - WAY_OF_WORK.md §6 (validation)
 
@@ -585,7 +585,7 @@ Voorbeeldworkflows
 | Taak | Status |
 |------|:------:|
 | Alle issues #4, #5, #9, #10, #11 gesloten | ⏳ |
-| LESSONS_LEARNED.md compleet met secties 12-14 | ⏳ |
+| LESSONS.md compleet met secties 12-14 | ⏳ |
 | Project instructies geüpdatet | ⏳ |
 | README.md naar v1.1 | ⏳ |
 | CHANGELOG.md bijgewerkt | ⏳ |
@@ -627,7 +627,7 @@ TE REVIEWEN:
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │ 8.1 Kritische Reflectie ────┐                                      │
-│     (LESSONS_LEARNED)       │                                      │
+│     (LESSONS)       │                                      │
 │                             ▼                                      │
 │ 8.2 V16 Skill Updates ──────┼──► 8.3 Validatie & Testing          │
 │     (#10, #4)               │         (alle skills)                │
@@ -718,7 +718,7 @@ data = frappe.parse_json(json_string)
 
 **Dit is de #1 oorzaak van AI-gegenereerde ERPNext code failures.**
 
-> Zie: LESSONS_LEARNED.md §1.1
+> Zie: LESSONS.md §1.1
 
 ### ⚠️ UI Event vs Hook Name Mapping
 

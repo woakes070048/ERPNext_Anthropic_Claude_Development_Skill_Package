@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Quick validation script for Anthropic skill format.
-Based on documented requirements from LESSONS_LEARNED.md §6.3
+Based on documented requirements from LESSONS.md §6.3
 """
 
 import os

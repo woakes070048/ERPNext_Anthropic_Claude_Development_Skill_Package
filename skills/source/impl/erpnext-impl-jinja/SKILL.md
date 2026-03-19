@@ -486,10 +486,7 @@ bench --site sitename migrate
 | wkhtmltopdf PDF | ✅ | ✅ | ⚠️ |
 | **Chrome PDF** | ❌ | ❌ | ✅ |
 
-### V16 Chrome PDF Considerations
-
-See `erpnext-syntax-jinja` for detailed Chrome PDF documentation.
-
+> V16 Chrome PDF: See `erpnext-syntax-jinja` for details.
 
 ---
 

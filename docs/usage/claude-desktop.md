@@ -112,4 +112,4 @@ Projects + Skills = Powerful combination:
 
 - Read [USAGE.md](../../USAGE.md) for skill overview
 - See [claude-web.md](claude-web.md) for detailed upload instructions
-- Review [LESSONS_LEARNED.md](../../LESSONS_LEARNED.md) for common pitfalls
+- Review [LESSONS.md](../../LESSONS.md) for common pitfalls

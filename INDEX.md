@@ -155,7 +155,7 @@ What do you need to build?
 | [DEPENDENCIES.md](docs/DEPENDENCIES.md) | Skill dependency matrix |
 | [INSTALL.md](INSTALL.md) | Installation instructions |
 | [ROADMAP.md](ROADMAP.md) | Project status and history |
-| [LESSONS_LEARNED.md](LESSONS_LEARNED.md) | Technical discoveries |
+| [LESSONS.md](LESSONS.md) | Technical discoveries |
 
 ---
 

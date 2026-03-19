@@ -51,7 +51,7 @@ ERPNext_Anthropic_Claude_Development_Skill_Package/
 ├── INSTALL.md          ✅ Redirect naar USAGE.md
 ├── USAGE.md            ✅ Platform guides
 ├── ROADMAP.md          ✅ Project status
-├── LESSONS_LEARNED.md  ✅ Technische lessen
+├── LESSONS.md  ✅ Technische lessen
 ├── WAY_OF_WORK.md      ✅ Methodology
 ├── docs/               ✅ Documentatie
 ├── skills/             ✅ 28 skills

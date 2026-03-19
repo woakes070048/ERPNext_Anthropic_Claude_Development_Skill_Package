@@ -41,7 +41,7 @@ curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
 | Vooronderzoek | `docs/masterplan/erpnext-vooronderzoek.md` |
 | Research docs | `docs/research/research-[topic].md` |
 | Voortgang | `ROADMAP.md` |
-| Geleerde lessen | `LESSONS_LEARNED.md` |
+| Geleerde lessen | `LESSONS.md` |
 | Way of Work | `WAY_OF_WORK.md` |
 
 ---
@@ -172,4 +172,4 @@ date = frappe.utils.nowdate()
 
 ---
 
-*Zie `LESSONS_LEARNED.md` op GitHub voor alle geleerde lessen.*
+*Zie `LESSONS.md` op GitHub voor alle geleerde lessen.*

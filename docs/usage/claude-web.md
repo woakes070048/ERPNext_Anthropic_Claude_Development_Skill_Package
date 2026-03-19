@@ -142,4 +142,4 @@ Users can still upload personal skills that are private to their account.
 
 - Read [USAGE.md](../../USAGE.md) for skill overview
 - Check individual skill documentation in `skills/source/*/SKILL.md`
-- Review [LESSONS_LEARNED.md](../../LESSONS_LEARNED.md) for common pitfalls
+- Review [LESSONS.md](../../LESSONS.md) for common pitfalls

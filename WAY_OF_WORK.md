@@ -410,7 +410,7 @@ This leads to:
 |------|-------|------------------|
 | Current phase & progress | ROADMAP.md | After EVERY phase |
 | Methodology & workflows | WAY_OF_WORK.md | When process changes |
-| Technical lessons | LESSONS_LEARNED.md | When discoveries made |
+| Technical lessons | LESSONS.md | When discoveries made |
 | Open tasks | GitHub Issues | As needed |
 | Project instructions | Claude Project | Only for HOW, never for WHERE |
 

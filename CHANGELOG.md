@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-18
+
 ### Added
 - CONTRIBUTING.md with skill development guidelines
 - SECURITY.md with vulnerability disclosure policy
-- CHANGELOG.md (this file)
+- CHANGELOG.md
 - GitHub issue and PR templates
+- REQUIREMENTS.md with quality criteria
+- DECISIONS.md with 15 numbered architectural decisions (D-001 to D-015)
+- SOURCES.md with all verified documentation URLs
+
+### Changed
+- Renamed LESSONS_LEARNED.md to LESSONS.md (workflow template alignment)
+- All 28 SKILL.md frontmatters migrated to YAML folded block scalar (`>`) format
 
 ## [1.1.0] - 2026-01-18
 

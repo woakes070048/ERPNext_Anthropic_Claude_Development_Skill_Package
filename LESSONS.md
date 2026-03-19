@@ -92,7 +92,7 @@ Split een fase wanneer:
 | ROADMAP.md | Actuele project status |
 | Masterplan | Oorspronkelijke visie |
 | Amendments | Specifieke wijzigingen |
-| LESSONS_LEARNED.md | Technische & proces lessen |
+| LESSONS.md | Technische & proces lessen |
 
 ---
 
