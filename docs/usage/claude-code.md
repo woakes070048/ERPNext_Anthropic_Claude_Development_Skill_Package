@@ -1,6 +1,6 @@
 # Claude Code Installation Guide
 
-Install the ERPNext Skills Package in Claude Code for terminal-based development.
+Install the Frappe Claude Skill Package in Claude Code for terminal-based development.
 
 ## Installation Methods
 
@@ -10,10 +10,10 @@ Personal skills are available across all your projects.
 
 ```bash
 # Clone the repository
-git clone https://github.com/OpenAEC-Foundation/ERPNext_Anthropic_Claude_Development_Skill_Package.git
+git clone https://github.com/OpenAEC-Foundation/Frappe_Claude_Skill_Package.git
 
 # Copy skills to personal directory
-cp -r ERPNext_Anthropic_Claude_Development_Skill_Package/skills/source/* ~/.claude/skills/
+cp -r Frappe_Claude_Skill_Package/skills/source/* ~/.claude/skills/
 
 # Verify installation
 ls ~/.claude/skills/
@@ -36,7 +36,7 @@ Project skills are committed to version control and shared with your team.
 mkdir -p .claude/skills
 
 # Copy skills
-cp -r /path/to/ERPNext_Anthropic_Claude_Development_Skill_Package/skills/source/* .claude/skills/
+cp -r /path/to/Frappe_Claude_Skill_Package/skills/source/* .claude/skills/
 
 # Commit to version control
 git add .claude/skills
@@ -138,7 +138,7 @@ chmod +x ~/.claude/skills/*/scripts/*.py 2>/dev/null
 ## Updating Skills
 
 ```bash
-cd ERPNext_Anthropic_Claude_Development_Skill_Package
+cd Frappe_Claude_Skill_Package
 git pull
 cp -r skills/source/* ~/.claude/skills/
 ```

@@ -60,10 +60,10 @@ This package encodes **53 hard-won lessons** like this into deterministic skills
 
 ```bash
 # Clone the repository
-git clone https://github.com/OpenAEC-Foundation/ERPNext_Anthropic_Claude_Development_Skill_Package.git
+git clone https://github.com/OpenAEC-Foundation/Frappe_Claude_Skill_Package.git
 
 # Copy all 53 skills to your Claude Code skills directory
-cp -r ERPNext_Anthropic_Claude_Development_Skill_Package/skills/source/* ~/.claude/skills/
+cp -r Frappe_Claude_Skill_Package/skills/source/* ~/.claude/skills/
 ```
 
 ### Claude.ai Web/Desktop
@@ -111,7 +111,7 @@ This package also serves as a **template** for building Claude skill packages in
 
 See [`WAY_OF_WORK.md`](WAY_OF_WORK.md) for the methodology we used to build these skills.
 
-**Found an issue?** [Open an issue](https://github.com/OpenAEC-Foundation/ERPNext_Anthropic_Claude_Development_Skill_Package/issues/new)
+**Found an issue?** [Open an issue](https://github.com/OpenAEC-Foundation/Frappe_Claude_Skill_Package/issues/new)
 **Want to contribute?** PRs welcome!
 
 ---
@@ -128,5 +128,5 @@ MIT — See [LICENSE.md](LICENSE.md) for details.
 </p>
 
 <p align="center">
-  <a href="https://github.com/OpenAEC-Foundation/ERPNext_Anthropic_Claude_Development_Skill_Package/stargazers">⭐ Star this repo if it helps you!</a>
+  <a href="https://github.com/OpenAEC-Foundation/Frappe_Claude_Skill_Package/stargazers">⭐ Star this repo if it helps you!</a>
 </p>

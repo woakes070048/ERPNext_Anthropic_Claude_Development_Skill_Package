@@ -137,7 +137,7 @@ This is the #1 cause of AI-generated ERPNext code failures. All skills in this p
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/OpenAEC-Foundation/ERPNext_Anthropic_Claude_Development_Skill_Package/issues)
+- **Issues**: [GitHub Issues](https://github.com/OpenAEC-Foundation/Frappe_Claude_Skill_Package/issues)
 - **Documentation**: [Full Documentation](docs/)
 
 ## License
