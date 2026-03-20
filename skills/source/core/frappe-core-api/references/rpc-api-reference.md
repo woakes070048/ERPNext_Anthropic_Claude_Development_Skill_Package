@@ -1,21 +1,27 @@
 # RPC API Reference
 
-## Basic Structure
+> Complete reference for Frappe Remote Procedure Calls via whitelisted methods.
+
+---
+
+## Endpoint Structure
 
 ```
 GET/POST /api/method/{dotted.path.to.function}
 ```
 
-The function MUST be marked with `@frappe.whitelist()`.
+The function MUST be decorated with `@frappe.whitelist()`.
 
 ---
 
-## GET vs POST
+## HTTP Methods
 
-| Method | Usage | Auto Commit |
-|--------|-------|-------------|
-| **GET** | Read-only operations | No |
-| **POST** | State-changing operations | Yes |
+| Method | Use For | Auto Commit |
+|--------|---------|-------------|
+| GET | Read-only operations | No |
+| POST | State-changing operations | Yes |
+
+**ALWAYS** use GET for queries, POST for mutations.
 
 ---
 
@@ -24,44 +30,40 @@ The function MUST be marked with `@frappe.whitelist()`.
 ### Basic Pattern
 
 ```python
-# my_app/api.py
 import frappe
 
 @frappe.whitelist()
 def get_customer_balance(customer):
-    """Get outstanding balance for customer."""
-    balance = frappe.db.sql("""
-        SELECT SUM(outstanding_amount)
-        FROM `tabSales Invoice`
-        WHERE customer = %s AND docstatus = 1
-    """, customer)[0][0] or 0
-    
+    """GET /api/method/myapp.api.get_customer_balance?customer=CUST-001"""
+    balance = frappe.db.get_value("Sales Invoice",
+        {"customer": customer, "docstatus": 1},
+        "sum(outstanding_amount)") or 0
     return {"customer": customer, "balance": balance}
 ```
 
-### With Type Hints and Validation
+### With Input Validation
 
 ```python
-@frappe.whitelist()
-def create_payment(
-    customer: str,
-    amount: float,
-    payment_type: str = "Receive"
-) -> str:
-    """Create new Payment Entry."""
+@frappe.whitelist(methods=["POST"])
+def create_payment(customer: str, amount: float, payment_type: str = "Receive"):
     if not customer:
         frappe.throw(_("Customer is required"))
-    
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw(_("Customer {0} does not exist").format(customer))
+
+    amount = float(amount)
     if amount <= 0:
         frappe.throw(_("Amount must be positive"))
-    
+
+    if not frappe.has_permission("Payment Entry", "create"):
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
     pe = frappe.new_doc("Payment Entry")
     pe.payment_type = payment_type
     pe.party_type = "Customer"
     pe.party = customer
     pe.paid_amount = amount
     pe.insert()
-    
     return pe.name
 ```
 
@@ -69,32 +71,13 @@ def create_payment(
 
 ## Decorator Options
 
-### allow_guest
-
-```python
-@frappe.whitelist(allow_guest=True)
-def public_endpoint():
-    """No authentication required."""
-    return {"status": "ok", "version": "1.0"}
-```
-
-### methods (v14+)
-
-```python
-@frappe.whitelist(methods=["POST"])
-def only_post_allowed(data):
-    """Only POST requests allowed."""
-    return process_data(data)
-```
-
-### xss_safe
-
-```python
-@frappe.whitelist(xss_safe=True)
-def return_html():
-    """Response will not be XSS-escaped."""
-    return "<h1>Safe HTML</h1>"
-```
+| Option | Effect | Version |
+|--------|--------|---------|
+| `@frappe.whitelist()` | Requires authentication | All |
+| `allow_guest=True` | No authentication needed | All |
+| `methods=["POST"]` | Restrict HTTP methods | [v14+] |
+| `methods=["GET", "POST"]` | Allow specific methods | [v14+] |
+| `xss_safe=True` | Skip XSS escaping on response | All |
 
 ---
 
@@ -104,51 +87,50 @@ def return_html():
 
 ```bash
 # GET for read-only
-curl -X GET "https://erp.example.com/api/method/my_app.api.get_customer_balance?customer=CUST-00001" \
-  -H "Authorization: token api_key:api_secret"
+curl -X GET "https://erp.example.com/api/method/myapp.api.get_customer_balance?customer=CUST-001" \
+  -H "Authorization: token api_key:api_secret" \
+  -H "Accept: application/json"
 
 # POST for state-changing
-curl -X POST "https://erp.example.com/api/method/my_app.api.create_payment" \
+curl -X POST "https://erp.example.com/api/method/myapp.api.create_payment" \
   -H "Authorization: token api_key:api_secret" \
   -H "Content-Type: application/json" \
-  -d '{"customer": "CUST-00001", "amount": 500}'
+  -d '{"customer": "CUST-001", "amount": 500}'
 ```
 
 ### Via Python
 
 ```python
-import requests
-
 # GET
 response = requests.get(
-    'https://erp.example.com/api/method/my_app.api.get_customer_balance',
-    params={'customer': 'CUST-00001'},
-    headers=headers
-)
+    f'{BASE_URL}/api/method/myapp.api.get_customer_balance',
+    params={'customer': 'CUST-001'}, headers=headers)
 
 # POST
 response = requests.post(
-    'https://erp.example.com/api/method/my_app.api.create_payment',
-    json={'customer': 'CUST-00001', 'amount': 500},
-    headers=headers
-)
+    f'{BASE_URL}/api/method/myapp.api.create_payment',
+    json={'customer': 'CUST-001', 'amount': 500}, headers=headers)
 ```
 
 ---
 
 ## Response Structure
 
-**Success:**
+### Success
+
 ```json
 {"message": "return_value_from_function"}
 ```
 
-**Error:**
+The return value is ALWAYS wrapped in a `message` key. Can be string, dict, list, or number.
+
+### Error
+
 ```json
 {
     "exc_type": "ValidationError",
     "exc": "Traceback...",
-    "_server_messages": "[{\"message\": \"Error message\"}]"
+    "_server_messages": "[{\"message\": \"Error details\"}]"
 }
 ```
 
@@ -156,99 +138,155 @@ response = requests.post(
 
 ## Client-Side Calls (JavaScript)
 
-### frappe.call (Callback)
+### frappe.xcall (RECOMMENDED)
 
 ```javascript
-frappe.call({
-    method: 'my_app.api.get_customer_balance',
-    args: {
-        customer: 'CUST-00001'
-    },
-    callback: function(r) {
-        if (r.message) {
-            console.log('Balance:', r.message.balance);
-        }
-    },
-    error: function(r) {
-        frappe.msgprint(__('Failed to get balance'));
-    }
-});
-```
-
-### frappe.call Options
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `method` | string | Python method path |
-| `args` | object | Arguments |
-| `callback` | function | Success callback |
-| `error` | function | Error callback |
-| `async` | bool | Async call (default: true) |
-| `freeze` | bool | Freeze UI during call |
-| `freeze_message` | string | Message during freeze |
-| `btn` | jQuery | Button to disable |
-
-### frappe.call (Promise)
-
-```javascript
-frappe.call({
-    method: 'my_app.api.get_customer_balance',
-    args: {customer: 'CUST-00001'}
-}).then(r => {
-    if (r.message) {
-        console.log('Balance:', r.message.balance);
-    }
-});
-```
-
-### frappe.xcall (Simpler API - RECOMMENDED)
-
-```javascript
-// Async/await - cleanest syntax
-const result = await frappe.xcall('my_app.api.get_customer_balance', {
-    customer: 'CUST-00001'
+// Async/await — cleanest syntax
+const result = await frappe.xcall('myapp.api.get_customer_balance', {
+    customer: 'CUST-001'
 });
 console.log(result.balance);
 
 // With error handling
 try {
-    const result = await frappe.xcall('my_app.api.create_payment', {
-        customer: 'CUST-00001',
-        amount: 500
+    const name = await frappe.xcall('myapp.api.create_payment', {
+        customer: 'CUST-001', amount: 500
     });
-    frappe.show_alert(__('Payment created: {0}', [result]));
+    frappe.show_alert(__('Payment created: {0}', [name]));
 } catch (e) {
     frappe.msgprint(__('Payment failed'));
 }
 ```
 
----
-
-## frm.call (Form Context)
-
-For controller methods within a document:
+### frappe.call (Callback/Promise)
 
 ```javascript
-// Client Script
-frm.call('get_linked_doc', {
-    throw_if_missing: true
-}).then(r => {
-    if (r.message) {
-        console.log('Linked doc:', r.message);
-    }
-});
+// Promise pattern
+frappe.call({
+    method: 'myapp.api.get_customer_balance',
+    args: {customer: 'CUST-001'},
+    freeze: true,
+    freeze_message: __('Loading...')
+}).then(r => console.log(r.message));
 ```
 
-**Controller requirement:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `method` | string | Python method dotted path |
+| `args` | object | Arguments to pass |
+| `callback` | function | Success callback |
+| `error` | function | Error callback |
+| `async` | bool | Async call (default: true) |
+| `freeze` | bool | Freeze UI during call |
+| `freeze_message` | string | Message shown during freeze |
+| `btn` | jQuery | Button to disable during call |
+
+### frm.call (Document Context)
+
+```javascript
+frm.call('get_linked_doc', {throw_if_missing: true})
+    .then(r => console.log(r.message));
+```
+
+Requires controller method with `@frappe.whitelist()`:
+
 ```python
 class MyDocType(Document):
     @frappe.whitelist()
     def get_linked_doc(self, throw_if_missing=False):
-        if not self.reference_name:
-            if throw_if_missing:
-                frappe.throw(_("No linked document"))
-            return None
         return frappe.get_doc(self.reference_type, self.reference_name)
+```
+
+---
+
+## Standard frappe.client Methods
+
+These built-in methods provide CRUD without writing custom endpoints:
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `frappe.client.get_value` | POST | Get single field value |
+| `frappe.client.get_list` | POST | List with filters and fields |
+| `frappe.client.get` | POST | Get full document |
+| `frappe.client.insert` | POST | Create new document |
+| `frappe.client.save` | POST | Update existing document |
+| `frappe.client.delete` | POST | Delete document |
+| `frappe.client.submit` | POST | Submit document |
+| `frappe.client.cancel` | POST | Cancel document |
+| `frappe.client.get_count` | POST | Count documents |
+
+### Examples
+
+```bash
+# Get value
+POST /api/method/frappe.client.get_value
+{"doctype": "Customer", "filters": {"name": "CUST-001"}, "fieldname": "customer_name"}
+
+# Get count
+POST /api/method/frappe.client.get_count
+{"doctype": "Sales Order", "filters": {"status": "Draft"}}
+
+# Insert
+POST /api/method/frappe.client.insert
+{"doc": {"doctype": "Customer", "customer_name": "New", "customer_type": "Company"}}
+
+# Submit
+POST /api/method/frappe.client.submit
+{"doc": {"doctype": "Sales Order", "name": "SO-00001"}}
+```
+
+---
+
+## Run Document Method
+
+Execute a whitelisted method on a specific document instance:
+
+```bash
+POST /api/method/run_doc_method
+{"dt": "Sales Order", "dn": "SO-00001", "method": "get_taxes_and_charges"}
+```
+
+[v15+] Also available via v2 API:
+```
+POST /api/v2/document/Sales Order/SO-00001/method/get_taxes_and_charges
+```
+
+---
+
+## Server Script API Type
+
+Alternative to whitelisted Python methods — configured via UI:
+
+1. Server Script > New > Script Type: "API"
+2. API Method: `myapp.my_endpoint`
+3. Becomes `/api/method/myapp.my_endpoint`
+4. Enable Rate Limit (optional) [v15+]
+
+```python
+# In Server Script body
+response = {"customer": frappe.form_dict.customer}
+frappe.response["message"] = response
+```
+
+---
+
+## Error Handling Pattern
+
+```python
+@frappe.whitelist()
+def safe_operation(docname):
+    try:
+        doc = frappe.get_doc("Sales Order", docname)
+        doc.check_permission("write")
+        doc.submit()
+        return {"success": True, "name": doc.name}
+    except frappe.DoesNotExistError:
+        frappe.throw(_("Document not found"), frappe.DoesNotExistError)
+    except frappe.PermissionError:
+        raise  # Re-raise permission errors as-is
+    except Exception:
+        frappe.log_error(title="API Error")
+        frappe.throw(_("Operation failed. Please try again."))
 ```
 
 ---
@@ -260,54 +298,9 @@ class MyDocType(Document):
 ```python
 @frappe.whitelist()
 def get_salary(employee):
-    # Check permission
     if not frappe.has_permission("Salary Slip", "read"):
         frappe.throw(_("Not permitted"), frappe.PermissionError)
-    
-    return frappe.db.get_value(
-        "Salary Slip",
-        {"employee": employee},
-        "gross_pay"
-    )
+    return frappe.db.get_value("Salary Slip", {"employee": employee}, "gross_pay")
 ```
 
----
-
-## Error Response Pattern
-
-```python
-@frappe.whitelist()
-def validated_operation(data):
-    # Input validation
-    if not data:
-        frappe.throw(_("Data is required"), frappe.MandatoryError)
-    
-    try:
-        result = process_data(data)
-        return {"status": "success", "result": result}
-    except frappe.DoesNotExistError as e:
-        frappe.throw(_("Record not found: {0}").format(str(e)))
-    except Exception as e:
-        frappe.log_error(title="API Error", message=str(e))
-        frappe.throw(_("Operation failed. Please try again."))
-```
-
----
-
-## Server Script API Type
-
-Alternative to whitelisted methods via UI:
-
-1. Server Script → New
-2. Script Type: "API"
-3. API Method: `my_app.my_endpoint` (becomes `/api/method/my_app.my_endpoint`)
-4. Enable Rate Limit (optional, v15+)
-
-```python
-# In Server Script
-response = {
-    "customer": frappe.form_dict.customer,
-    "balance": get_balance(frappe.form_dict.customer)
-}
-frappe.response["message"] = response
-```
+The `@frappe.whitelist()` decorator only ensures the user is authenticated — it does NOT check DocType permissions.

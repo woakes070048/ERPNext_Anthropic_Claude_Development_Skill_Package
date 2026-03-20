@@ -13,49 +13,75 @@ metadata:
   version: "2.0"
 ---
 
-# ERPNext Permissions Skill
+# Frappe Permissions
 
-> Deterministic patterns for implementing robust permission systems in Frappe/ERPNext applications.
+> Deterministic patterns for the five-layer Frappe permission system.
 
 ---
 
-## Overview
-
-Frappe's permission system has five layers:
+## Permission Layers
 
 | Layer | Controls | Configured Via | Version |
 |-------|----------|----------------|---------|
 | **Role Permissions** | What users CAN do | DocType permissions table | All |
-| **User Permissions** | WHICH documents users see | User Permission records | All |
-| **Perm Levels** | WHICH fields users see | Field permlevel property | All |
-| **Permission Hooks** | Custom logic | hooks.py | All |
-| **Data Masking** | MASKED field values | Field mask property | v16+ |
+| **User Permissions** | WHICH records users see | User Permission DocType | All |
+| **Perm Levels** | WHICH fields users see/edit | Field `permlevel` property | All |
+| **Permission Hooks** | Custom deny logic | `hooks.py` | All |
+| **Data Masking** | Masked field values | Field `mask` property | [v16+] |
 
 ---
 
-## Quick Reference
+## Decision Tree
 
-### Permission Types
+```
+Need to control access?
+├── Who can Create/Read/Write/Delete a DocType? → Role Permissions
+├── Which specific records can a user see? → User Permissions
+├── Which fields should be hidden? → Perm Levels (permlevel 1+)
+├── Which fields show masked values? → Data Masking [v16+]
+├── Custom runtime deny logic? → has_permission hook
+├── Filter list queries dynamically? → permission_query_conditions hook
+└── Share one document with one user? → frappe.share
 
-| Type | Check | For |
-|------|-------|-----|
-| `read` | `frappe.has_permission(dt, "read")` | View document |
-| `write` | `frappe.has_permission(dt, "write")` | Edit document |
-| `create` | `frappe.has_permission(dt, "create")` | Create new |
-| `delete` | `frappe.has_permission(dt, "delete")` | Delete |
-| `submit` | `frappe.has_permission(dt, "submit")` | Submit (submittable only) |
-| `cancel` | `frappe.has_permission(dt, "cancel")` | Cancel |
-| `select` | `frappe.has_permission(dt, "select")` | Select in Link (v14+) |
-| `mask` | Role permission for unmasked view | View unmasked data (v16+) |
+Checking permissions in code?
+├── Before action → frappe.has_permission() or doc.has_permission()
+├── Raise on denial → doc.check_permission() or throw=True
+├── System bypass → doc.flags.ignore_permissions = True (ALWAYS document why)
+└── List query → ALWAYS use frappe.get_list() for user-facing data
+```
 
-### Automatic Roles
+---
 
-| Role | Assigned To |
-|------|-------------|
-| `Guest` | Everyone (including anonymous) |
-| `All` | All registered users |
-| `Administrator` | Only Administrator user |
-| `Desk User` | System Users (v15+) |
+## Permission Types
+
+| Type | API Check | Applies To |
+|------|-----------|------------|
+| `read` | `frappe.has_permission(dt, "read")` | All DocTypes |
+| `write` | `frappe.has_permission(dt, "write")` | All DocTypes |
+| `create` | `frappe.has_permission(dt, "create")` | All DocTypes |
+| `delete` | `frappe.has_permission(dt, "delete")` | All DocTypes |
+| `submit` | `frappe.has_permission(dt, "submit")` | Submittable only |
+| `cancel` | `frappe.has_permission(dt, "cancel")` | Submittable only |
+| `amend` | `frappe.has_permission(dt, "amend")` | Submittable only |
+| `select` | `frappe.has_permission(dt, "select")` | Link fields [v14+] |
+| `report` | N/A | Report Builder access |
+| `export` | N/A | Excel/CSV export |
+| `import` | N/A | Data Import Tool |
+| `share` | N/A | Share with other users |
+| `print` | N/A | Print/PDF generation |
+| `email` | N/A | Send email |
+| `mask` | Role permission for unmasked view | Data Masking [v16+] |
+
+---
+
+## Automatic Roles
+
+| Role | Assigned To | Notes |
+|------|-------------|-------|
+| `Guest` | Everyone (including anonymous) | Public pages |
+| `All` | All registered users | Basic authenticated access |
+| `Administrator` | Only the Administrator user | ALWAYS has all permissions |
+| `Desk User` | System Users only | [v15+] |
 
 ---
 
@@ -64,10 +90,10 @@ Frappe's permission system has five layers:
 ### Check Permission
 
 ```python
-# DocType level
+# DocType-level
 frappe.has_permission("Sales Order", "write")
 
-# Document level
+# Document-level (by name or object)
 frappe.has_permission("Sales Order", "write", "SO-00001")
 frappe.has_permission("Sales Order", "write", doc=doc)
 
@@ -77,172 +103,130 @@ frappe.has_permission("Sales Order", "read", user="john@example.com")
 # Throw on denial
 frappe.has_permission("Sales Order", "delete", throw=True)
 
-# On document instance
+# Debug mode — prints evaluation steps
+frappe.has_permission("Sales Order", "read", debug=True)
+print(frappe.local.permission_debug_log)
+```
+
+### Document Instance Methods
+
+```python
 doc = frappe.get_doc("Sales Order", "SO-00001")
+
+# Returns bool
 if doc.has_permission("write"):
     doc.status = "Approved"
     doc.save()
 
-# Raise error if no permission
+# Raises frappe.PermissionError if denied
 doc.check_permission("write")
 ```
 
-### Get Permissions
+### Get Effective Permissions
 
 ```python
 from frappe.permissions import get_doc_permissions
 
-# Get all permissions for document
 perms = get_doc_permissions(doc)
 # {'read': 1, 'write': 1, 'create': 0, 'delete': 0, ...}
+
+perms = get_doc_permissions(doc, user="john@example.com")
 ```
 
-### User Permissions
+---
+
+## User Permissions (Record-Level)
+
+Restrict users to specific Link field values (e.g., specific Company, Territory).
 
 ```python
 from frappe.permissions import add_user_permission, remove_user_permission
 
-# Restrict user to specific company
+# Restrict user to one company
 add_user_permission(
     doctype="Company",
     name="My Company",
     user="john@example.com",
-    is_default=1
+    is_default=1,            # auto-fill in new documents
+    applicable_for="Sales Order"  # only for this DocType (optional)
 )
 
 # Remove restriction
 remove_user_permission("Company", "My Company", "john@example.com")
 
-# Get user's permissions
+# Query current restrictions
 from frappe.permissions import get_user_permissions
 perms = get_user_permissions("john@example.com")
-```
-
-### Sharing
-
-```python
-from frappe.share import add as add_share
-
-# Share document with user
-add_share(
-    doctype="Sales Order",
-    name="SO-00001",
-    user="jane@example.com",
-    read=1,
-    write=1
-)
+# {"Company": [{"doc": "My Company", "is_default": 1}], ...}
 ```
 
 ---
 
-## Data Masking (v16+)
+## Sharing (Document-Level)
 
-Data Masking protects sensitive field values while keeping fields visible. Users without `mask` permission see masked values (e.g., `****`, `+91-811XXXXXXX`).
+Grant access to a single document for a specific user.
 
-### Use Cases
+```python
+from frappe.share import add as add_share, remove as remove_share
 
-- HR: Show employee details but mask salary amounts
-- Support: Show phone numbers partially masked
-- Finance: Show bank account fields without full numbers
+add_share("Sales Order", "SO-00001", "jane@example.com",
+          read=1, write=1, share=0, notify=1)
 
-### Enable Data Masking
+remove_share("Sales Order", "SO-00001", "jane@example.com")
 
-**Via DocType (Developer Mode) or Customize Form:**
-
-```json
-{
-  "fieldname": "phone_number",
-  "fieldtype": "Data",
-  "options": "Phone",
-  "mask": 1
-}
+# Share with everyone
+add_share("Sales Order", "SO-00001", everyone=1, read=1)
 ```
 
-**Supported Field Types:**
-- Data, Date, Datetime
-- Currency, Float, Int, Percent
-- Phone, Password
-- Link, Dynamic Link
-- Select, Read Only, Duration
+---
 
-### Configure Permission
+## Field-Level Permissions (Perm Levels)
 
-Add `mask` permission to roles that should see unmasked data:
+Group fields by `permlevel` (0-9). Level 0 MUST be granted before higher levels.
 
 ```json
 {
+  "fields": [
+    {"fieldname": "employee_name", "permlevel": 0},
+    {"fieldname": "salary",        "permlevel": 1}
+  ],
   "permissions": [
-    {"role": "Employee", "permlevel": 0, "read": 1},
-    {"role": "HR Manager", "permlevel": 0, "read": 1, "mask": 1}
+    {"role": "Employee",   "permlevel": 0, "read": 1},
+    {"role": "HR Manager", "permlevel": 0, "read": 1, "write": 1},
+    {"role": "HR Manager", "permlevel": 1, "read": 1, "write": 1}
   ]
 }
 ```
 
-### How It Works
+**Rule**: Levels do NOT imply hierarchy. Level 2 is not "higher" than level 1. They are independent field groups.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ DATA MASKING FLOW                                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. Field has mask=1 in DocField configuration                      │
-│                                                                     │
-│  2. System checks: meta.has_permlevel_access_to(                    │
-│        fieldname=df.fieldname,                                      │
-│        df=df,                                                       │
-│        permission_type="mask"                                       │
-│     )                                                               │
-│                                                                     │
-│  3. If user LACKS mask permission:                                  │
-│     └─► Value automatically masked in:                              │
-│         • Form views                                                │
-│         • List views                                                │
-│         • Report views                                              │
-│         • API responses (/api/resource/, /api/method/)              │
-│                                                                     │
-│  4. If user HAS mask permission:                                    │
-│     └─► Full value displayed                                        │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+---
+
+## Data Masking [v16+]
+
+Fields with `mask=1` show masked values (e.g., `****`, `+91-811XXXXXXX`) to users without `mask` permission.
+
+```json
+{
+  "fieldname": "phone_number", "fieldtype": "Data", "mask": 1
+}
 ```
 
-### ⚠️ Critical: Custom SQL Queries
+Grant `mask` permission to roles that MUST see unmasked values:
 
-**Data Masking does NOT apply to:**
-- Custom SQL queries
-- Query Reports using raw SQL
-- Direct `frappe.db.sql()` calls
-
-**You must implement masking manually:**
-
-```python
-def get_customer_report(filters):
-    data = frappe.db.sql("""
-        SELECT name, phone, email FROM tabCustomer
-    """, as_dict=True)
-    
-    # Manual masking for users without permission
-    if not frappe.has_permission("Customer", "mask"):
-        for row in data:
-            if row.phone:
-                row.phone = mask_phone(row.phone)
-    
-    return data
-
-def mask_phone(phone):
-    """Mask phone number: +91-81123XXXXX"""
-    if len(phone) > 5:
-        return phone[:6] + "X" * (len(phone) - 6)
-    return "****"
+```json
+{"role": "HR Manager", "permlevel": 0, "read": 1, "mask": 1}
 ```
+
+**CRITICAL**: Data masking does NOT apply to `frappe.db.sql()` or Query Reports with raw SQL. You MUST mask manually in custom SQL queries.
 
 ---
 
 ## Permission Hooks
 
-### has_permission Hook
+### has_permission — Custom Deny Logic
 
-Add custom permission logic. Can only **deny**, not grant.
+Can only **deny** access. NEVER returns `True` to grant. ALWAYS returns `None` to continue standard checks.
 
 ```python
 # hooks.py
@@ -254,22 +238,15 @@ has_permission = {
 ```python
 # myapp/permissions.py
 def check_order_permission(doc, ptype, user):
-    """
-    Returns:
-        None: Continue standard checks
-        False: Deny permission
-    """
-    # Deny editing cancelled orders for non-managers
     if ptype == "write" and doc.docstatus == 2:
         if "Sales Manager" not in frappe.get_roles(user):
             return False
-    
     return None  # ALWAYS return None by default
 ```
 
-### permission_query_conditions Hook
+### permission_query_conditions — Filter List Queries
 
-Filter list queries. Only affects `get_list()`, NOT `get_all()`.
+Returns SQL WHERE clause fragment. Only affects `get_list()`, NOT `get_all()`.
 
 ```python
 # hooks.py
@@ -279,85 +256,26 @@ permission_query_conditions = {
 ```
 
 ```python
-# myapp/permissions.py
 def customer_query(user):
-    """Return SQL WHERE clause fragment."""
     if not user:
         user = frappe.session.user
-    
-    # Managers see all
     if "Sales Manager" in frappe.get_roles(user):
         return ""
-    
-    # Others see only their customers
     return f"`tabCustomer`.owner = {frappe.db.escape(user)}"
 ```
 
-**CRITICAL**: Always use `frappe.db.escape()` - never string concatenation!
+**ALWAYS** use `frappe.db.escape()` — NEVER use string concatenation with raw user input.
 
 ---
 
 ## get_list vs get_all
 
-| Method | User Permissions | Query Hook |
-|--------|------------------|------------|
-| `frappe.get_list()` | ✅ Applied | ✅ Applied |
-| `frappe.get_all()` | ❌ Ignored | ❌ Ignored |
+| Method | User Permissions | Query Hook | Use For |
+|--------|------------------|------------|---------|
+| `frappe.get_list()` | Applied | Applied | User-facing queries |
+| `frappe.get_all()` | Ignored | Ignored | System/background queries |
 
-```python
-# User-facing query - respects permissions
-docs = frappe.get_list("Sales Order", filters={"status": "Open"})
-
-# System query - bypasses permissions
-docs = frappe.get_all("Sales Order", filters={"status": "Open"})
-```
-
----
-
-## Field-Level Permissions (Perm Levels)
-
-### Configure Field
-
-```json
-{
-  "fieldname": "salary",
-  "fieldtype": "Currency",
-  "permlevel": 1
-}
-```
-
-### Configure Role Access
-
-```json
-{
-  "permissions": [
-    {"role": "Employee", "permlevel": 0, "read": 1},
-    {"role": "HR Manager", "permlevel": 0, "read": 1, "write": 1},
-    {"role": "HR Manager", "permlevel": 1, "read": 1, "write": 1}
-  ]
-}
-```
-
-**Rule**: Level 0 MUST be granted before higher levels.
-
----
-
-## Decision Tree
-
-```
-Need to control access?
-├── To entire DocType → Role Permissions
-├── To specific documents → User Permissions
-├── To specific fields (hide completely) → Perm Levels
-├── To specific fields (show masked) → Data Masking (v16+)
-├── With custom logic → has_permission hook
-└── For list queries → permission_query_conditions hook
-
-Checking permissions in code?
-├── Before action → frappe.has_permission() or doc.has_permission()
-├── Raise error → doc.check_permission() or throw=True
-└── Bypass needed → doc.flags.ignore_permissions = True (document why!)
-```
+**ALWAYS** use `get_list()` when returning data to users. `get_all()` bypasses ALL permission filtering.
 
 ---
 
@@ -366,25 +284,7 @@ Checking permissions in code?
 ### Owner-Only Edit
 
 ```json
-{
-  "role": "Sales User",
-  "read": 1, "write": 1, "create": 1,
-  "if_owner": 1
-}
-```
-
-### Check Before Action
-
-```python
-@frappe.whitelist()
-def approve_order(order_name):
-    doc = frappe.get_doc("Sales Order", order_name)
-    
-    if not doc.has_permission("write"):
-        frappe.throw(_("No permission"), frappe.PermissionError)
-    
-    doc.status = "Approved"
-    doc.save()
+{"role": "Sales User", "read": 1, "write": 1, "create": 1, "if_owner": 1}
 ```
 
 ### Role-Restricted Endpoint
@@ -393,33 +293,49 @@ def approve_order(order_name):
 @frappe.whitelist()
 def sensitive_action():
     frappe.only_for(["Manager", "Administrator"])
-    # Only reaches here if user has role
+    # Only reaches here if user has one of these roles
+```
+
+### Bypass Permissions (Document Why!)
+
+```python
+# On document — ALWAYS add a comment explaining the reason
+doc.flags.ignore_permissions = True
+doc.save()
+
+# On method call
+doc.save(ignore_permissions=True)
+doc.insert(ignore_permissions=True)
 ```
 
 ---
 
 ## Critical Rules
 
-1. **ALWAYS use permission API** - Not role checks
-2. **ALWAYS escape SQL** - `frappe.db.escape(user)`
-3. **ALWAYS use get_list** - For user-facing queries
-4. **ALWAYS return None** - In has_permission hooks (not True)
-5. **ALWAYS document** - When using ignore_permissions
-6. **ALWAYS clear cache** - After permission changes: `frappe.clear_cache()`
-7. **ALWAYS mask manually** - In custom SQL queries (v16+)
+1. **ALWAYS** use `frappe.has_permission()` — NEVER check roles directly for access control
+2. **ALWAYS** use `frappe.get_list()` for user-facing queries — NEVER `get_all()`
+3. **ALWAYS** escape SQL in query hooks — `frappe.db.escape(user)`
+4. **ALWAYS** prefix table names in query hooks — `` `tabDocType`.fieldname ``
+5. **ALWAYS** return `None` in `has_permission` hooks by default — NEVER `True`
+6. **ALWAYS** clear cache after permission changes — `frappe.clear_cache()`
+7. **ALWAYS** document `ignore_permissions` usage with a comment
+8. **NEVER** throw errors in `has_permission` hooks — return `False` to deny
+9. **NEVER** grant permlevel 1+ without granting permlevel 0 first
+10. **NEVER** assume data masking applies to custom SQL queries [v16+]
 
 ---
 
 ## Anti-Patterns
 
-| ❌ Don't | ✅ Do |
-|----------|-------|
-| `if "Role" in frappe.get_roles()` | `frappe.has_permission(dt, ptype)` |
+| Do NOT | Do Instead |
+|--------|------------|
+| `if "Role" in frappe.get_roles()` for access | `frappe.has_permission(dt, ptype)` |
 | `frappe.get_all()` for user queries | `frappe.get_list()` |
-| `return True` in has_permission | `return None` |
-| `f"owner = '{user}'"` | `f"owner = {frappe.db.escape(user)}"` |
-| `frappe.throw()` in hooks | `return False` |
-| Assume masking in custom SQL | Implement masking manually |
+| `return True` in has_permission hook | `return None` |
+| `f"owner = '{user}'"` in SQL | `f"owner = {frappe.db.escape(user)}"` |
+| `frappe.throw()` in permission hooks | `return False` |
+| `frappe.db.set_value()` for user-facing updates | `doc.save()` with permission check |
+| Sensitive data in error messages | Generic `frappe.PermissionError` |
 
 ---
 
@@ -427,47 +343,42 @@ def sensitive_action():
 
 | Feature | v14 | v15 | v16 |
 |---------|-----|-----|-----|
-| `select` permission | ✅ | ✅ | ✅ |
-| `Desk User` role | ❌ | ✅ | ✅ |
-| Custom Permission Types | ❌ | ❌ | ✅ (experimental) |
-| **Data Masking** | ❌ | ❌ | ✅ |
-| `mask` permission type | ❌ | ❌ | ✅ |
+| `select` permission | Yes | Yes | Yes |
+| `Desk User` role | No | Yes | Yes |
+| Data Masking (`mask` field) | No | No | Yes |
+| `mask` permission type | No | No | Yes |
+| Custom Permission Types | No | No | Experimental |
 
 ---
 
-## Debugging
+## Permission Precedence
 
-```python
-# Enable debug output
-frappe.has_permission("Sales Order", "read", doc, debug=True)
-
-# View logs
-print(frappe.local.permission_debug_log)
-
-# Check user's effective permissions
-from frappe.permissions import get_doc_permissions
-perms = get_doc_permissions(doc, user="john@example.com")
-```
+1. **Administrator** — ALWAYS has all permissions (cannot be restricted)
+2. **Role Permissions** — Based on assigned roles
+3. **User Permissions** — Restricts to specific document values
+4. **has_permission hook** — Can only deny (any `False` = denied)
+5. **Sharing** — Grants access to shared documents
+6. **if_owner** — Further restricts to owned documents
 
 ---
 
 ## Reference Files
 
-See `references/` folder for:
-- `permission-types-reference.md` - All permission types
-- `permission-api-reference.md` - Complete API reference
-- `permission-hooks-reference.md` - Hook patterns
-- `examples.md` - Working examples
-- `anti-patterns.md` - Common mistakes
-
----
+| File | Contents |
+|------|----------|
+| [permission-types-reference.md](references/permission-types-reference.md) | All permission types with options |
+| [permission-api-reference.md](references/permission-api-reference.md) | Complete API with all signatures |
+| [permission-hooks-reference.md](references/permission-hooks-reference.md) | Hook patterns and examples |
+| [examples.md](references/examples.md) | Working implementation examples |
+| [anti-patterns.md](references/anti-patterns.md) | Common mistakes and fixes |
 
 ## Related Skills
 
-- `frappe-core-database` - Database operations that respect permissions
-- `frappe-syntax-controllers` - Controller permission checks
-- `frappe-syntax-hooks` - Hook configuration
+- `frappe-core-database` — Database operations that respect permissions
+- `frappe-core-api` — API endpoints with permission checks
+- `frappe-syntax-controllers` — Controller permission validation
+- `frappe-syntax-hooks` — Hook configuration patterns
 
 ---
 
-*Last updated: 2026-01-18 | Frappe v14/v15/v16*
+*Verified against Frappe docs 2026-03-20 | Frappe v14/v15/v16*

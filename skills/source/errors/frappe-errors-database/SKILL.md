@@ -1,11 +1,14 @@
 ---
 name: frappe-errors-database
 description: >
-  Use when handling database errors in ERPNext/Frappe. Covers
-  DoesNotExistError, DuplicateEntryError, transaction failures, query
-  errors, retry patterns, and data integrity for v14/v15/v16. Keywords:
-  database error, DoesNotExistError, DuplicateEntryError, transaction
-  failed, query error.
+  Use when handling database errors in Frappe/ERPNext. Covers
+  DuplicateEntryError, LinkValidationError, MandatoryError,
+  TimestampMismatchError, CharacterLengthExceededError, InReadOnlyMode,
+  QueryTimeoutError, SQL injection errors, frappe.db.sql parameter format
+  (% vs %s), get_value returning None, transaction deadlocks, MariaDB gone
+  away, too many connections. Error-to-fix mapping for v14/v15/v16.
+  Keywords: database error, DuplicateEntryError, TimestampMismatchError,
+  SQL injection, deadlock, MariaDB gone away, query timeout.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:
@@ -13,354 +16,427 @@ metadata:
   version: "2.0"
 ---
 
-# ERPNext Database - Error Handling
+# Frappe Database Error Diagnosis & Resolution
 
-This skill covers error handling patterns for database operations. For syntax, see `frappe-core-database`.
-
-**Version**: v14/v15/v16 compatible
+Cross-ref: `frappe-core-database` (API syntax), `frappe-errors-controllers` (controller errors).
 
 ---
 
-## Database Exception Types
+## Error-to-Fix Mapping Table
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ FRAPPE DATABASE EXCEPTIONS                                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ frappe.DoesNotExistError                                            │
-│   └─► Document not found (get_doc, get_value with strict)           │
-│                                                                     │
-│ frappe.DuplicateEntryError                                          │
-│   └─► Unique constraint violation (insert, rename)                  │
-│                                                                     │
-│ frappe.LinkExistsError                                              │
-│   └─► Cannot delete - linked documents exist                        │
-│                                                                     │
-│ frappe.ValidationError                                              │
-│   └─► General validation failure                                    │
-│                                                                     │
-│ frappe.TimestampMismatchError                                       │
-│   └─► Concurrent edit detected (modified since load)                │
-│                                                                     │
-│ frappe.db.InternalError                                             │
-│   └─► Database-level error (deadlock, connection lost)              │
-│                                                                     │
-│ frappe.QueryTimeoutError (v15+)                                     │
-│   └─► Query exceeded timeout limit                                  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Error / Exception | HTTP | Cause | Fix |
+|-------------------|------|-------|-----|
+| `DuplicateEntryError` | 409 | Unique constraint violation on insert/rename | Check existence first OR catch and return existing |
+| `DoesNotExistError` | 404 | `get_doc()` on missing record | Use `frappe.db.exists()` first OR catch exception |
+| `LinkValidationError` | 417 | Link field points to non-existent record | Validate link target exists before save |
+| `LinkExistsError` | N/A | Delete blocked by linked documents | Show linked docs to user; use `force=True` carefully |
+| `MandatoryError` | 417 | Required field is empty on save | Set all mandatory fields before insert/save |
+| `TimestampMismatchError` | N/A | Concurrent edit detected (`modified` changed) | Reload doc and retry, or inform user to refresh |
+| `CharacterLengthExceededError` | 417 | String exceeds field maxlength / DB column size | Truncate input or increase field length |
+| `DataTooLongException` | 417 | Value exceeds DB column storage capacity | Same as CharacterLengthExceededError |
+| `InReadOnlyMode` | 503 | Write attempted during read-only mode | Check `frappe.flags.in_import` or site config |
+| `QueryTimeoutError` | N/A | Query exceeded time limit [v15+] | Add indexes, reduce result set, paginate |
+| `QueryDeadlockError` | N/A | Two transactions waiting on each other | Retry with backoff; reduce transaction scope |
+| `TooManyWritesError` | N/A | Excessive writes in single request | Batch operations; use background jobs |
+| `InternalError` (gone away) | N/A | MariaDB connection dropped | Reconnect with `frappe.db.connect()` |
+| `InternalError` (too many) | N/A | Connection pool exhausted | Check `max_connections`; close idle connections |
+| `ValidationError` | 417 | General validation failure in save | Read error message; fix field values |
+| SQL syntax error | N/A | Wrong `frappe.db.sql()` parameter format | Use `%(name)s` with dict, NOT `%s` with tuple |
 
 ---
 
-## Main Decision: Error Handling by Operation
+## Exception Hierarchy
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ WHAT DATABASE OPERATION?                                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ ► frappe.get_doc() / frappe.get_cached_doc()                            │
-│   └─► Can raise DoesNotExistError                                       │
-│   └─► Check with frappe.db.exists() first OR catch exception            │
-│                                                                         │
-│ ► doc.insert() / frappe.new_doc().insert()                              │
-│   └─► Can raise DuplicateEntryError (unique constraints)                │
-│   └─► Can raise ValidationError (mandatory fields, custom validation)   │
-│                                                                         │
-│ ► doc.save()                                                            │
-│   └─► Can raise ValidationError                                         │
-│   └─► Can raise TimestampMismatchError (concurrent edit)                │
-│                                                                         │
-│ ► doc.delete() / frappe.delete_doc()                                    │
-│   └─► Can raise LinkExistsError (linked documents)                      │
-│   └─► Use force=True to ignore links (careful!)                         │
-│                                                                         │
-│ ► frappe.db.sql() / frappe.qb                                           │
-│   └─► Can raise InternalError (syntax, deadlock, connection)            │
-│   └─► Always use parameterized queries                                  │
-│                                                                         │
-│ ► frappe.db.set_value() / doc.db_set()                                  │
-│   └─► Silently fails if record doesn't exist                            │
-│   └─► No validation triggered                                           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+Exception
+├── frappe.ValidationError (HTTP 417)
+│   ├── frappe.MandatoryError
+│   ├── frappe.LinkValidationError
+│   ├── frappe.CharacterLengthExceededError
+│   ├── frappe.DataTooLongException
+│   ├── frappe.UniqueValidationError
+│   ├── frappe.UpdateAfterSubmitError
+│   └── frappe.DataError
+├── frappe.DoesNotExistError (HTTP 404)
+├── frappe.DuplicateEntryError (HTTP 409)  ← inherits NameError
+├── frappe.TimestampMismatchError
+├── frappe.LinkExistsError
+├── frappe.QueryTimeoutError
+├── frappe.QueryDeadlockError
+├── frappe.TooManyWritesError
+├── frappe.InReadOnlyMode (HTTP 503)
+└── frappe.db.InternalError  ← MariaDB/Postgres driver error
 ```
 
 ---
 
-## Error Handling Patterns
-
-### Pattern 1: Safe Document Fetch
+## frappe.db.sql() Parameter Format
 
 ```python
-# Option A: Check first (preferred for expected missing docs)
-if frappe.db.exists("Customer", customer_name):
-    customer = frappe.get_doc("Customer", customer_name)
-else:
-    frappe.throw(_("Customer '{0}' not found").format(customer_name))
+# ❌ WRONG — %s with positional tuple (works but fragile)
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = %s", ("ITEM-001",))
 
-# Option B: Try/except (preferred when doc usually exists)
-try:
-    customer = frappe.get_doc("Customer", customer_name)
-except frappe.DoesNotExistError:
-    frappe.throw(_("Customer '{0}' not found").format(customer_name))
+# ❌ WRONG — f-string or .format() — SQL INJECTION!
+frappe.db.sql(f"SELECT * FROM `tabItem` WHERE name = '{item_name}'")
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = '{}'".format(item_name))
 
-# Option C: Get with default (for optional lookups)
-customer = frappe.db.get_value("Customer", customer_name, "*", as_dict=True)
-if not customer:
-    # Handle missing - no error raised
-    customer = {"customer_name": "Unknown", "credit_limit": 0}
+# ❌ WRONG — bare % operator
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = '%s'" % item_name)
+
+# ✅ CORRECT — named parameters with dict (ALWAYS use this)
+frappe.db.sql(
+    "SELECT * FROM `tabItem` WHERE name = %(name)s AND warehouse = %(wh)s",
+    {"name": item_name, "wh": warehouse},
+    as_dict=True
+)
+
+# ✅ CORRECT — frappe.qb (query builder, no injection risk)
+Item = frappe.qb.DocType("Item")
+result = (
+    frappe.qb.from_(Item)
+    .select(Item.name, Item.item_name)
+    .where(Item.warehouse == warehouse)
+    .run(as_dict=True)
+)
 ```
 
-### Pattern 2: Safe Document Insert
+**Rule**: ALWAYS use `%(name)s` with a dict parameter. NEVER use string formatting for SQL values.
+
+---
+
+## get_value Returns None — Not an Exception
 
 ```python
-def create_customer(data):
-    """Create customer with duplicate handling."""
+# ❌ DANGEROUS — get_value returns None, not raises
+credit = frappe.db.get_value("Customer", "CUST-001", "credit_limit")
+if credit > 1000:  # TypeError: '>' not supported between NoneType and int
+    pass
+
+# ✅ CORRECT — handle None explicitly
+credit = frappe.db.get_value("Customer", "CUST-001", "credit_limit")
+if credit is None:
+    frappe.throw(_("Customer not found"))
+credit = credit or 0  # Default to 0 if field is empty
+
+# ✅ CORRECT — get_value with as_dict for multiple fields
+data = frappe.db.get_value("Customer", "CUST-001",
+    ["credit_limit", "disabled"], as_dict=True)
+if not data:  # None when record not found
+    frappe.throw(_("Customer not found"))
+if data.disabled:
+    frappe.throw(_("Customer is disabled"))
+```
+
+**Key behavior by method**:
+| Method | Record Not Found | Empty Field |
+|--------|-----------------|-------------|
+| `get_doc()` | Raises `DoesNotExistError` | Returns field default |
+| `get_value()` | Returns `None` | Returns `None` or `""` |
+| `get_all()` | Returns `[]` | Included in result |
+| `exists()` | Returns `False` | N/A |
+| `set_value()` | Silently does nothing | N/A |
+| `db.sql()` | Returns `[]` or `()` | Included in result |
+
+---
+
+## Handling Each Exception Type
+
+### DuplicateEntryError
+
+```python
+# Pattern: Insert with duplicate handling
+def create_or_get(doctype, data):
     try:
-        doc = frappe.get_doc({
-            "doctype": "Customer",
-            "customer_name": data.get("name"),
-            "customer_type": data.get("type", "Company")
-        })
+        doc = frappe.get_doc({"doctype": doctype, **data})
         doc.insert()
-        return {"success": True, "name": doc.name}
-        
+        return doc
     except frappe.DuplicateEntryError:
-        # Already exists - return existing
-        existing = frappe.db.get_value("Customer", {"customer_name": data.get("name")})
-        return {"success": True, "name": existing, "existing": True}
-        
-    except frappe.ValidationError as e:
-        return {"success": False, "error": str(e)}
+        # Race condition safe: someone else created it
+        name = frappe.db.get_value(doctype, data, "name")
+        return frappe.get_doc(doctype, name)
 ```
 
-### Pattern 3: Safe Document Delete
+### TimestampMismatchError
 
 ```python
-def delete_customer(customer_name):
-    """Delete customer with link handling."""
-    if not frappe.db.exists("Customer", customer_name):
-        frappe.throw(_("Customer '{0}' not found").format(customer_name))
-    
+# Pattern: Concurrent edit detection
+try:
+    doc = frappe.get_doc("Sales Invoice", name)
+    doc.update(updates)
+    doc.save()
+except frappe.TimestampMismatchError:
+    frappe.throw(
+        _("Document modified by another user. Please refresh and try again."),
+        title=_("Concurrent Edit")
+    )
+```
+
+### LinkValidationError & MandatoryError
+
+```python
+# Pattern: Pre-validate before save
+def safe_create_invoice(data):
+    errors = []
+
+    # Check mandatory fields
+    if not data.get("customer"):
+        errors.append(_("Customer is required"))
+    if not data.get("items"):
+        errors.append(_("At least one item is required"))
+
+    # Check link validity
+    if data.get("customer"):
+        if not frappe.db.exists("Customer", data["customer"]):
+            errors.append(_("Customer '{0}' not found").format(data["customer"]))
+
+    if errors:
+        frappe.throw("<br>".join(errors))
+
+    doc = frappe.get_doc({"doctype": "Sales Invoice", **data})
+    doc.insert()
+    return doc
+```
+
+### CharacterLengthExceededError
+
+```python
+# Pattern: Truncate before save
+def safe_set_description(doc, description):
+    max_len = 140  # Match field length in DocType
+    if len(description) > max_len:
+        description = description[:max_len - 3] + "..."
+        frappe.msgprint(_("Description truncated to {0} characters").format(max_len))
+    doc.description = description
+```
+
+### QueryTimeoutError [v15+]
+
+```python
+# Pattern: Paginated query to avoid timeout
+def get_large_report(filters):
     try:
-        frappe.delete_doc("Customer", customer_name)
-        return {"success": True}
-        
-    except frappe.LinkExistsError as e:
-        # Get linked documents for user info
-        linked = get_linked_documents("Customer", customer_name)
+        return frappe.db.sql(query, filters, as_dict=True)
+    except frappe.QueryTimeoutError:
+        frappe.log_error(frappe.get_traceback(), "Report Query Timeout")
         frappe.throw(
-            _("Cannot delete customer. Linked documents exist:<br>{0}").format(
-                "<br>".join([f"• {l['doctype']}: {l['name']}" for l in linked[:10]])
-            )
+            _("Report too large. Please narrow your date range or add filters."),
+            title=_("Query Timeout")
         )
 ```
 
-### Pattern 4: Concurrent Edit Handling
+### InReadOnlyMode
 
 ```python
-def update_document(doctype, name, updates):
-    """Update with concurrent edit detection."""
+# Pattern: Check before write
+def safe_write(doctype, name, field, value):
+    if frappe.flags.in_import:
+        frappe.db.set_value(doctype, name, field, value)
+        return
     try:
-        doc = frappe.get_doc(doctype, name)
-        doc.update(updates)
-        doc.save()
-        return {"success": True}
-        
-    except frappe.TimestampMismatchError:
-        # Document was modified by another user
-        frappe.throw(
-            _("This document was modified by another user. Please refresh and try again."),
-            title=_("Concurrent Edit Detected")
-        )
-    except frappe.DoesNotExistError:
-        frappe.throw(_("Document not found"))
+        frappe.db.set_value(doctype, name, field, value)
+    except frappe.InReadOnlyMode:
+        frappe.log_error(f"Write blocked: {doctype}/{name}", "Read-Only Mode")
+        frappe.throw(_("System is in read-only mode. Please try again later."))
 ```
-
-### Pattern 5: Batch Operations with Error Isolation
-
-```python
-def bulk_update_items(items_data):
-    """Bulk update with per-item error handling."""
-    results = {"success": [], "failed": []}
-    
-    for item_data in items_data:
-        item_code = item_data.get("item_code")
-        
-        try:
-            if not frappe.db.exists("Item", item_code):
-                results["failed"].append({
-                    "item": item_code,
-                    "error": "Item not found"
-                })
-                continue
-            
-            doc = frappe.get_doc("Item", item_code)
-            doc.update(item_data)
-            doc.save()
-            results["success"].append(item_code)
-            
-        except frappe.ValidationError as e:
-            results["failed"].append({
-                "item": item_code,
-                "error": str(e)
-            })
-        except Exception as e:
-            frappe.log_error(frappe.get_traceback(), f"Bulk update error: {item_code}")
-            results["failed"].append({
-                "item": item_code,
-                "error": "Unexpected error"
-            })
-    
-    return results
-```
-
-### Pattern 6: Safe SQL Query
-
-```python
-def get_sales_report(customer, from_date, to_date):
-    """Safe SQL query with error handling."""
-    try:
-        # ALWAYS use parameterized queries
-        result = frappe.db.sql("""
-            SELECT 
-                customer,
-                SUM(grand_total) as total,
-                COUNT(*) as count
-            FROM `tabSales Invoice`
-            WHERE customer = %(customer)s
-            AND posting_date BETWEEN %(from_date)s AND %(to_date)s
-            AND docstatus = 1
-            GROUP BY customer
-        """, {
-            "customer": customer,
-            "from_date": from_date,
-            "to_date": to_date
-        }, as_dict=True)
-        
-        return result[0] if result else {"total": 0, "count": 0}
-        
-    except frappe.db.InternalError as e:
-        frappe.log_error(frappe.get_traceback(), "Sales Report Query Error")
-        frappe.throw(_("Database error. Please try again or contact support."))
-```
-
-> **See**: `references/patterns.md` for more error handling patterns.
 
 ---
 
-## Transaction Handling
-
-### Automatic Transaction Management
+## Transaction Deadlocks
 
 ```python
-# Frappe wraps each request in a transaction
-# On success: auto-commit
-# On exception: auto-rollback
+# ❌ CAUSES DEADLOCKS — long transaction with many writes
+def process_all():
+    for inv in frappe.get_all("Sales Invoice", limit=10000):
+        doc = frappe.get_doc("Sales Invoice", inv.name)
+        doc.custom_field = "value"
+        doc.save()  # Each save locks rows; other processes wait
 
-def validate(self):
-    # All changes are in ONE transaction
-    self.calculate_totals()
-    frappe.db.set_value("Counter", "main", "count", 100)
-    
-    if error_condition:
-        frappe.throw("Error")  # EVERYTHING rolls back
+# ✅ CORRECT — batch with commits to release locks
+def process_all():
+    invoices = frappe.get_all("Sales Invoice", limit=10000)
+    BATCH = 100
+    for i in range(0, len(invoices), BATCH):
+        for inv in invoices[i:i + BATCH]:
+            frappe.db.set_value("Sales Invoice", inv.name, "custom_field", "value")
+        frappe.db.commit()  # Release locks after each batch
+
+# ✅ CORRECT — retry on deadlock
+import time
+def with_deadlock_retry(func, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except frappe.QueryDeadlockError:
+            if attempt < max_retries - 1:
+                frappe.db.rollback()
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                raise
 ```
 
-### Manual Savepoints (Advanced)
+---
+
+## MariaDB Gone Away / Too Many Connections
+
+```python
+# Pattern: Connection recovery
+def reliable_operation():
+    try:
+        return frappe.db.sql("SELECT 1")
+    except frappe.db.InternalError as e:
+        msg = str(e).lower()
+        if "gone away" in msg or "lost connection" in msg:
+            frappe.db.connect()  # Reconnect
+            return frappe.db.sql("SELECT 1")
+        if "too many connections" in msg:
+            frappe.log_error("Too many DB connections", "Connection Pool")
+            frappe.throw(_("Server busy. Please try again in a moment."))
+        raise  # Unknown InternalError — re-raise
+```
+
+**Prevention**:
+- Set `wait_timeout` in MariaDB config (default 28800s)
+- Check `max_connections` setting matches your workload
+- Use connection pooling in production (Gunicorn workers)
+
+---
+
+## Transaction Rules
+
+### When to Commit
+
+| Context | Auto-Commit? | Manual Commit? |
+|---------|:------------:|:--------------:|
+| Web request (POST/PUT) | YES | NEVER |
+| Controller hooks (validate, on_update) | YES | NEVER |
+| doc_events hooks | YES | NEVER |
+| Scheduler tasks | NO | ALWAYS |
+| Background jobs (frappe.enqueue) | NO | ALWAYS |
+| bench execute | NO | ALWAYS |
+
+### Savepoints for Partial Rollback
 
 ```python
 def complex_operation():
-    """Use savepoints for partial rollback."""
-    # Create savepoint
-    frappe.db.savepoint("before_risky_op")
-    
+    frappe.db.savepoint("before_risky")
     try:
         risky_database_operation()
     except Exception:
-        # Rollback only to savepoint
-        frappe.db.rollback(save_point="before_risky_op")
-        frappe.log_error(frappe.get_traceback(), "Risky Op Failed")
-        # Continue with alternative approach
-        safe_alternative_operation()
+        frappe.db.rollback(save_point="before_risky")
+        safe_alternative()  # Continue with fallback
+
+# Transaction hooks [v15+]
+frappe.db.after_commit.add(lambda: send_notification())
+frappe.db.after_rollback.add(lambda: cleanup_files())
 ```
 
-### Scheduler/Background Jobs
+---
+
+## SQL Injection Prevention
 
 ```python
-def background_task():
-    """Background jobs need explicit commit."""
-    try:
-        for record in records:
-            process_record(record)
-        
-        # REQUIRED in background jobs
-        frappe.db.commit()
-        
-    except Exception:
-        frappe.db.rollback()
-        frappe.log_error(frappe.get_traceback(), "Background Task Error")
+# ❌ INJECTION VULNERABLE — all of these
+frappe.db.sql(f"SELECT * FROM `tabItem` WHERE name = '{user_input}'")
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = '%s'" % user_input)
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = '{}'".format(user_input))
+
+# ❌ ALSO VULNERABLE — in permission_query_conditions
+def query_conditions(user):
+    return f"owner = '{user}'"  # Unescaped!
+
+# ✅ SAFE — parameterized query
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = %(name)s", {"name": user_input})
+
+# ✅ SAFE — frappe.db.escape() for dynamic SQL (permission hooks)
+def query_conditions(user):
+    return f"owner = {frappe.db.escape(user)}"
+
+# ✅ SAFE — query builder
+Item = frappe.qb.DocType("Item")
+frappe.qb.from_(Item).where(Item.name == user_input).run()
+
+# ✅ SAFE — ORM methods
+frappe.get_all("Item", filters={"name": user_input})
+frappe.db.get_value("Item", user_input, "item_name")
+```
+
+---
+
+## db.set_value Silent Failure
+
+```python
+# ❌ DANGEROUS — no error if record doesn't exist
+frappe.db.set_value("Customer", "NONEXISTENT", "status", "Active")
+# Returns without error! No rows updated.
+
+# ✅ ALWAYS verify existence before set_value
+if not frappe.db.exists("Customer", customer_name):
+    frappe.throw(_("Customer '{0}' not found").format(customer_name))
+frappe.db.set_value("Customer", customer_name, "status", "Active")
+
+# Note: set_value skips validate/on_update hooks
+# Use doc.save() when you need validation to run
 ```
 
 ---
 
 ## Critical Rules
 
-### ✅ ALWAYS
+### ALWAYS
+1. Use `%(name)s` dict params in `frappe.db.sql()` — NEVER string formatting
+2. Check `frappe.db.exists()` before `get_doc()` — or catch `DoesNotExistError`
+3. Handle `DuplicateEntryError` on every `insert()` call
+4. Handle `TimestampMismatchError` on every `save()` in APIs
+5. Call `frappe.db.commit()` in scheduler and background jobs
+6. Paginate large queries — use `limit` parameter
+7. Check `get_value()` result for `None` before using it
+8. Use `frappe.db.escape()` in dynamic SQL strings
 
-1. **Check existence before get_doc** - Or catch DoesNotExistError
-2. **Use parameterized SQL queries** - Never string formatting
-3. **Handle DuplicateEntryError on insert** - Unique constraints
-4. **Commit in scheduler/background jobs** - No auto-commit
-5. **Log database errors with context** - Include query/doc info
-6. **Use db.exists() for existence checks** - Not try/except get_doc
-
-### ❌ NEVER
-
-1. **Don't use string formatting in SQL** - SQL injection risk
-2. **Don't commit in controller hooks** - Breaks transaction
-3. **Don't ignore DoesNotExistError silently** - Handle or log
-4. **Don't assume db.set_value() succeeded** - No error on missing doc
-5. **Don't catch generic Exception for database ops** - Catch specific types
+### NEVER
+1. Use string formatting (`f""`, `.format()`, `%`) for SQL values
+2. Call `frappe.db.commit()` in controller hooks or doc_events
+3. Catch bare `Exception` and `pass` — log or re-raise specific types
+4. Assume `db.set_value()` succeeded — it fails silently on missing records
+5. Expose raw database error messages to users — log details, show generic message
+6. Run unbounded queries without `limit` — memory/timeout risk
 
 ---
 
 ## Quick Reference: Exception Handling
 
 ```python
-# DoesNotExistError - Document not found
 try:
     doc = frappe.get_doc("Customer", name)
 except frappe.DoesNotExistError:
-    frappe.throw(_("Customer not found"))
+    frappe.throw(_("Not found"))
 
-# DuplicateEntryError - Unique constraint violation
 try:
     doc.insert()
 except frappe.DuplicateEntryError:
-    # Handle duplicate
+    existing = frappe.db.get_value("Customer", filters, "name")
+except frappe.MandatoryError as e:
+    frappe.throw(_("Missing required field: {0}").format(e))
 
-# LinkExistsError - Cannot delete linked document
-try:
-    frappe.delete_doc("Customer", name)
-except frappe.LinkExistsError:
-    frappe.throw(_("Cannot delete - linked documents exist"))
-
-# TimestampMismatchError - Concurrent edit
 try:
     doc.save()
 except frappe.TimestampMismatchError:
-    frappe.throw(_("Document was modified. Please refresh."))
+    frappe.throw(_("Document modified. Please refresh."))
+except frappe.CharacterLengthExceededError:
+    frappe.throw(_("Text too long for field"))
 
-# InternalError - Database-level error
 try:
-    frappe.db.sql(query)
-except frappe.db.InternalError:
-    frappe.log_error(frappe.get_traceback(), "Database Error")
-    frappe.throw(_("Database error occurred"))
+    frappe.delete_doc("Customer", name)
+except frappe.LinkExistsError:
+    frappe.throw(_("Cannot delete — linked documents exist"))
+
+try:
+    frappe.db.sql(query, values)
+except frappe.QueryTimeoutError:          # [v15+]
+    frappe.throw(_("Query too slow. Add filters."))
+except frappe.QueryDeadlockError:
+    frappe.db.rollback()                   # Retry with backoff
+except frappe.db.InternalError as e:
+    frappe.log_error(frappe.get_traceback(), "DB Error")
 ```
 
 ---
@@ -369,15 +445,15 @@ except frappe.db.InternalError:
 
 | File | Contents |
 |------|----------|
-| `references/patterns.md` | Complete error handling patterns |
-| `references/examples.md` | Full working examples |
-| `references/anti-patterns.md` | Common mistakes to avoid |
+| `references/patterns.md` | Complete error handling patterns for all DB operations |
+| `references/examples.md` | Full working examples with error handling |
+| `references/anti-patterns.md` | Common mistakes with wrong/correct pairs |
 
 ---
 
 ## See Also
 
-- `frappe-core-database` - Database operations syntax
-- `frappe-errors-controllers` - Controller error handling
-- `frappe-errors-serverscripts` - Server Script error handling
-- `frappe-core-permissions` - Permission patterns
+- `frappe-core-database` — Database API syntax and query builder
+- `frappe-errors-controllers` — Controller error handling
+- `frappe-errors-hooks` — Hook error handling
+- `frappe-core-permissions` — Permission patterns

@@ -1,11 +1,13 @@
 ---
 name: frappe-errors-clientscripts
 description: >
-  Use when handling errors in ERPNext/Frappe Client Scripts. Covers
-  try/catch patterns, user feedback, server call error handling, validation
-  errors, async error handling, and debugging for v14/v15/v16. Keywords:
-  client script error, try catch, frappe.throw, async error, validation
-  error, error handling.
+  Use when debugging or preventing errors in Frappe Client Scripts.
+  Prevents TypeError, frappe.call failures, async/await mistakes,
+  cur_frm vs frm confusion, field not found, child table access errors,
+  timing issues, CSRF token errors, and permission denied on frappe.call.
+  Covers error diagnosis flowchart and debug tools for v14/v15/v16.
+  Keywords: client script error, TypeError, frappe.call, async await,
+  cur_frm, field not found, child table, CSRF, permission denied.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:
@@ -13,412 +15,247 @@ metadata:
   version: "2.0"
 ---
 
-# ERPNext Client Scripts - Error Handling
+# Client Script Errors — Diagnosis and Resolution
 
-This skill covers error handling patterns for Client Scripts. For syntax, see `frappe-syntax-clientscripts`. For implementation workflows, see `frappe-impl-clientscripts`.
-
-**Version**: v14/v15/v16 compatible
+Cross-refs: `frappe-syntax-clientscripts` (syntax), `frappe-impl-clientscripts` (workflows), `frappe-errors-serverscripts` (server-side).
 
 ---
 
-## Main Decision: How to Handle the Error?
+## Error Diagnosis Flowchart
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ WHAT TYPE OF ERROR ARE YOU HANDLING?                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ ► Validation error (must prevent save)?                                 │
-│   └─► frappe.throw() in validate event                                  │
-│                                                                         │
-│ ► Warning (inform user, allow continue)?                                │
-│   └─► frappe.msgprint() with indicator                                  │
-│                                                                         │
-│ ► Server call might fail?                                               │
-│   └─► try/catch with async/await OR callback error handling             │
-│                                                                         │
-│ ► Field value invalid (not blocking)?                                   │
-│   └─► frm.set_intro() or field description                              │
-│                                                                         │
-│ ► Need to debug/trace?                                                  │
-│   └─► console.log/warn/error + frappe.show_alert for dev                │
-│                                                                         │
-│ ► Unexpected error in any code?                                         │
-│   └─► Wrap in try/catch, log error, show user-friendly message          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+ERROR IN CLIENT SCRIPT
+│
+├─► TypeError: Cannot read properties of undefined
+│   ├─► "frm.doc.fieldname" → Field does not exist on DocType
+│   ├─► "r.message.value" → Server returned null/error
+│   └─► "row.fieldname" in child table → Row not fetched correctly
+│
+├─► frappe.call fails silently
+│   ├─► Missing error callback → Add error handler
+│   ├─► 403 Forbidden → Method not whitelisted (@frappe.whitelist)
+│   ├─► 417 Expectation Failed → Server-side frappe.throw()
+│   └─► 401 Unauthorized → Session expired or CSRF token invalid
+│
+├─► Uncaught (in promise) → Missing try/catch on async frappe.call
+│
+├─► Field appears blank after set_value → Timing issue (setup vs refresh)
+│
+├─► cur_frm is undefined → Using cur_frm in list/report context
+│
+└─► frappe.throw() does not prevent save → Used outside validate event
 ```
 
 ---
 
-## Error Feedback Methods
+## Error Message → Cause → Fix Table
 
-### Quick Reference
-
-| Method | Blocks Save? | User Action | Use For |
-|--------|:------------:|-------------|---------|
-| `frappe.throw()` | ✅ YES | Must dismiss | Validation errors |
-| `frappe.msgprint()` | ❌ NO | Must dismiss | Important info/warnings |
-| `frappe.show_alert()` | ❌ NO | Auto-dismiss | Success/info feedback |
-| `frm.set_intro()` | ❌ NO | None | Form-level warnings |
-| `frm.dashboard.set_headline()` | ❌ NO | None | Status indicators |
-| `console.error()` | ❌ NO | None | Debugging only |
-
-### frappe.throw() - Blocking Error
-
-```javascript
-// Basic throw - stops execution, prevents save
-frappe.throw(__('Customer is required'));
-
-// With title
-frappe.throw({
-    title: __('Validation Error'),
-    message: __('Amount cannot be negative')
-});
-
-// With indicator color
-frappe.throw({
-    message: __('Credit limit exceeded'),
-    indicator: 'red'
-});
-```
-
-**CRITICAL**: Only use `frappe.throw()` in `validate` event to prevent save. Using it elsewhere stops script execution but doesn't prevent form actions.
-
-### frappe.msgprint() - Non-Blocking Alert
-
-```javascript
-// Simple message
-frappe.msgprint(__('Document will be processed'));
-
-// With title and indicator
-frappe.msgprint({
-    title: __('Warning'),
-    message: __('Stock is running low'),
-    indicator: 'orange'
-});
-
-// With primary action button
-frappe.msgprint({
-    title: __('Confirm Action'),
-    message: __('This will archive 50 records. Continue?'),
-    primary_action: {
-        label: __('Yes, Archive'),
-        action: () => {
-            // perform action
-            frappe.hide_msgprint();
-        }
-    }
-});
-```
-
-### frappe.show_alert() - Toast Notification
-
-```javascript
-// Success (green, auto-dismiss)
-frappe.show_alert({
-    message: __('Saved successfully'),
-    indicator: 'green'
-}, 3);  // 3 seconds
-
-// Warning (orange)
-frappe.show_alert({
-    message: __('Some items are out of stock'),
-    indicator: 'orange'
-}, 5);
-
-// Error (red)
-frappe.show_alert({
-    message: __('Failed to fetch data'),
-    indicator: 'red'
-}, 5);
-```
+| Error Message | Cause | Fix |
+|---------------|-------|-----|
+| `TypeError: Cannot read properties of undefined (reading 'fieldname')` | Field does not exist on DocType or doc not loaded | ALWAYS check `frm.doc` exists before accessing fields |
+| `TypeError: frm.set_value is not a function` | Using `cur_frm` shortcut that is undefined | ALWAYS use the `frm` parameter from event handler |
+| `Uncaught (in promise)` | Unhandled async rejection from frappe.call | ALWAYS wrap async calls in try/catch |
+| `CSRFTokenError` / `403 with CSRF` | Token mismatch after session timeout | ALWAYS use `frappe.call()` (handles CSRF automatically) |
+| `Not permitted` / 403 on frappe.call | Server method missing `@frappe.whitelist()` | ALWAYS add `@frappe.whitelist()` decorator to API methods |
+| `frappe.throw() not preventing save` | `frappe.throw()` used outside `validate` event | ALWAYS use `frappe.throw()` only in `validate` |
+| `field not found: xyz` in set_query | Fieldname typo or field not in child table | Verify exact fieldname against DocType definition |
+| `row.item_code is undefined` | Accessing child row wrong — `locals` not synced | Use `frappe.get_doc(cdt, cdn)` in child table events |
+| `frm.set_value not working` | Called in `setup` before form fully loaded | Move field-setting logic to `refresh` event |
+| `Maximum call stack exceeded` | Circular trigger — field change fires own handler | Use `frm.flags` guard to break recursion |
 
 ---
 
-## Error Handling Patterns
+## Critical Error Patterns
 
-### Pattern 1: Synchronous Validation
+### 1. cur_frm vs frm — The #1 Beginner Mistake
 
 ```javascript
+// ❌ WRONG — cur_frm is undefined in many contexts
 frappe.ui.form.on('Sales Order', {
-    validate(frm) {
-        // Multiple validations - collect errors
-        let errors = [];
-        
-        if (!frm.doc.customer) {
-            errors.push(__('Customer is required'));
-        }
-        
-        if (frm.doc.grand_total <= 0) {
-            errors.push(__('Total must be greater than zero'));
-        }
-        
-        if (!frm.doc.items || frm.doc.items.length === 0) {
-            errors.push(__('At least one item is required'));
-        }
-        
-        // Throw all errors at once
-        if (errors.length > 0) {
-            frappe.throw({
-                title: __('Validation Errors'),
-                message: errors.join('<br>')
-            });
-        }
+    customer(frm) {
+        cur_frm.set_value('territory', 'Default');  // BREAKS in list view
+    }
+});
+
+// ✅ CORRECT — ALWAYS use the frm parameter
+frappe.ui.form.on('Sales Order', {
+    customer(frm) {
+        frm.set_value('territory', 'Default');
     }
 });
 ```
 
-### Pattern 2: Async Server Call with Error Handling
+**Rule**: NEVER use `cur_frm`. ALWAYS use the `frm` parameter passed to every event handler.
+
+### 2. Async/Await — Silent Failure Without try/catch
 
 ```javascript
+// ❌ WRONG — Unhandled rejection crashes silently
+frappe.ui.form.on('Sales Order', {
+    async customer(frm) {
+        let r = await frappe.call({
+            method: 'myapp.api.get_data',
+            args: { customer: frm.doc.customer }
+        });
+        frm.set_value('credit_limit', r.message.limit);  // r.message may be null
+    }
+});
+
+// ✅ CORRECT — try/catch with null check
 frappe.ui.form.on('Sales Order', {
     async customer(frm) {
         if (!frm.doc.customer) return;
-        
         try {
             let r = await frappe.call({
-                method: 'myapp.api.get_customer_details',
+                method: 'myapp.api.get_data',
                 args: { customer: frm.doc.customer }
             });
-            
             if (r.message) {
-                frm.set_value('credit_limit', r.message.credit_limit);
+                frm.set_value('credit_limit', r.message.limit || 0);
             }
         } catch (error) {
-            console.error('Failed to fetch customer:', error);
+            console.error('Customer fetch failed:', error);
             frappe.show_alert({
                 message: __('Could not load customer details'),
                 indicator: 'red'
             }, 5);
-            // Don't throw - allow user to continue
         }
     }
 });
 ```
 
-### Pattern 3: Async Validation with Server Check
+### 3. Child Table Access — Wrong Pattern
 
 ```javascript
+// ❌ WRONG — frm.doc.items[0] may not reflect latest state
+frappe.ui.form.on('Sales Order Item', {
+    item_code(frm, cdt, cdn) {
+        let row = frm.doc.items.find(r => r.name === cdn);  // fragile
+        row.rate = 100;  // Does not trigger UI refresh
+    }
+});
+
+// ✅ CORRECT — Use frappe.get_doc and frappe.model.set_value
+frappe.ui.form.on('Sales Order Item', {
+    item_code(frm, cdt, cdn) {
+        let row = frappe.get_doc(cdt, cdn);
+        if (!row.item_code) return;
+        frappe.model.set_value(cdt, cdn, 'rate', 100);  // Triggers refresh
+    }
+});
+```
+
+### 4. Timing — setup vs refresh
+
+```javascript
+// ❌ WRONG — set_value in setup, form not ready
 frappe.ui.form.on('Sales Order', {
-    async validate(frm) {
-        // Server-side validation
-        try {
-            let r = await frappe.call({
-                method: 'myapp.api.validate_order',
-                args: { 
-                    customer: frm.doc.customer,
-                    total: frm.doc.grand_total 
-                }
-            });
-            
-            if (r.message && !r.message.valid) {
-                frappe.throw({
-                    title: __('Validation Failed'),
-                    message: r.message.error
-                });
-            }
-        } catch (error) {
-            // Server error - decide: block or allow?
-            console.error('Validation call failed:', error);
-            
-            // Option 1: Block save on server error (safer)
-            frappe.throw(__('Could not validate. Please try again.'));
-            
-            // Option 2: Allow save with warning (use with caution)
-            // frappe.show_alert({
-            //     message: __('Validation skipped due to server error'),
-            //     indicator: 'orange'
-            // }, 5);
-        }
+    setup(frm) {
+        frm.set_value('company', 'My Company');  // May not work
     }
 });
-```
 
-### Pattern 4: frappe.call Callback Error Handling
-
-```javascript
-// When not using async/await
-frappe.call({
-    method: 'myapp.api.process_data',
-    args: { doc_name: frm.doc.name },
-    freeze: true,
-    freeze_message: __('Processing...'),
-    callback: (r) => {
-        if (r.message) {
-            frappe.show_alert({
-                message: __('Processing complete'),
-                indicator: 'green'
-            });
-            frm.reload_doc();
-        }
+// ✅ CORRECT — set_query in setup, set_value in refresh/onload
+frappe.ui.form.on('Sales Order', {
+    setup(frm) {
+        // Filters belong in setup
+        frm.set_query('customer', () => ({ filters: { disabled: 0 } }));
     },
-    error: (r) => {
-        // Server returned error (4xx, 5xx)
-        console.error('API Error:', r);
-        frappe.msgprint({
-            title: __('Error'),
-            message: __('Processing failed. Please try again.'),
-            indicator: 'red'
-        });
-    }
-});
-```
-
-### Pattern 5: Child Table Validation
-
-```javascript
-frappe.ui.form.on('Sales Invoice', {
-    validate(frm) {
-        let errors = [];
-        
-        (frm.doc.items || []).forEach((row, idx) => {
-            if (!row.item_code) {
-                errors.push(__('Row {0}: Item is required', [idx + 1]));
-            }
-            if (row.qty <= 0) {
-                errors.push(__('Row {0}: Quantity must be positive', [idx + 1]));
-            }
-            if (row.rate < 0) {
-                errors.push(__('Row {0}: Rate cannot be negative', [idx + 1]));
-            }
-        });
-        
-        if (errors.length > 0) {
-            frappe.throw({
-                title: __('Item Errors'),
-                message: errors.join('<br>')
-            });
+    refresh(frm) {
+        // Value changes belong in refresh (or onload for new docs)
+        if (frm.is_new()) {
+            frm.set_value('company', 'My Company');
         }
     }
 });
 ```
 
-### Pattern 6: Graceful Degradation
+### 5. frappe.throw() Scope — Only Works in validate
 
 ```javascript
-frappe.ui.form.on('Sales Order', {
-    async refresh(frm) {
-        // Try to load extra data, but don't fail if unavailable
-        try {
-            let stock = await frappe.call({
-                method: 'myapp.api.get_stock_summary',
-                args: { items: frm.doc.items.map(r => r.item_code) }
-            });
-            
-            if (stock.message) {
-                render_stock_dashboard(frm, stock.message);
-            }
-        } catch (error) {
-            // Log but don't disturb user
-            console.warn('Stock dashboard unavailable:', error);
-            // Optionally show subtle indicator
-            frm.dashboard.set_headline(
-                __('Stock info unavailable'),
-                'orange'
-            );
-        }
-    }
-});
-```
-
-> **See**: `references/patterns.md` for more error handling patterns.
-
----
-
-## Debugging Techniques
-
-### Console Logging
-
-```javascript
-// Development debugging
+// ❌ WRONG — throw in customer change does NOT prevent save
 frappe.ui.form.on('Sales Order', {
     customer(frm) {
-        console.log('Customer changed:', frm.doc.customer);
-        console.log('Full doc:', JSON.parse(JSON.stringify(frm.doc)));
-        
-        // Trace child table
-        console.table(frm.doc.items);
+        if (!frm.doc.customer) {
+            frappe.throw(__('Customer required'));  // Stops script, NOT save
+        }
     }
 });
-```
 
-### Conditional Debugging
-
-```javascript
-// Only log in development
-const DEBUG = frappe.boot.developer_mode;
-
-function debugLog(...args) {
-    if (DEBUG) {
-        console.log('[MyApp]', ...args);
-    }
-}
-
+// ✅ CORRECT — throw in validate prevents save
 frappe.ui.form.on('Sales Order', {
+    customer(frm) {
+        if (!frm.doc.customer) {
+            frappe.msgprint({ message: __('Customer required'), indicator: 'orange' });
+        }
+    },
     validate(frm) {
-        debugLog('Validating:', frm.doc.name);
-        // validation logic
+        if (!frm.doc.customer) {
+            frappe.throw(__('Customer is required'));  // Prevents save
+        }
     }
 });
 ```
 
-### Error Stack Traces
+### 6. Recursion Guard with Flags
 
 ```javascript
-try {
-    riskyOperation();
-} catch (error) {
-    console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        doc: frm.doc.name
-    });
-    
-    // User-friendly message (no technical details)
-    frappe.msgprint({
-        title: __('Error'),
-        message: __('An unexpected error occurred. Please contact support.'),
-        indicator: 'red'
-    });
-}
+// ❌ WRONG — discount change triggers amount recalc, which triggers discount...
+frappe.ui.form.on('Sales Order', {
+    discount_percent(frm) {
+        frm.set_value('grand_total', calculate(frm));  // Fires on_change loop
+    }
+});
+
+// ✅ CORRECT — Use flags to break the cycle
+frappe.ui.form.on('Sales Order', {
+    discount_percent(frm) {
+        if (frm.flags.skip_recalc) return;
+        frm.flags.skip_recalc = true;
+        frm.set_value('grand_total', calculate(frm));
+        frm.flags.skip_recalc = false;
+    }
+});
 ```
 
 ---
 
-## Critical Rules
+## Debug Tools
 
-### ✅ ALWAYS
-
-1. **Wrap async calls in try/catch** - Uncaught Promise rejections crash silently
-2. **Use `__()` for error messages** - All user-facing text must be translatable
-3. **Log errors to console** - Helps debugging without exposing to users
-4. **Collect multiple validation errors** - Don't throw on first error
-5. **Provide actionable error messages** - Tell user how to fix it
-
-### ❌ NEVER
-
-1. **Don't expose technical errors to users** - Catch and translate
-2. **Don't use `frappe.throw()` outside validate** - It stops execution but doesn't prevent save
-3. **Don't ignore server call failures** - Always handle error callback
-4. **Don't use `alert()` or `confirm()`** - Use frappe methods instead
-5. **Don't leave `console.log` in production** - Use conditional debugging
+| Tool | How to Use | When |
+|------|-----------|------|
+| Browser Console (F12) | `console.log(frm.doc)` | Inspect form state |
+| `console.table()` | `console.table(frm.doc.items)` | View child table rows |
+| `JSON.parse(JSON.stringify(frm.doc))` | Deep-clone for snapshot | Avoid circular refs in console |
+| `frappe.boot.developer_mode` | Check if dev mode on | Conditional debug logging |
+| `frappe.ui.toolbar.clear_cache()` | Clear client cache | After deploying script changes |
+| Network tab (F12) | Filter XHR requests | Inspect frappe.call payloads |
+| `frappe.show_alert({message: 'debug', indicator: 'blue'}, 5)` | Visual debug in UI | Quick feedback without console |
 
 ---
 
-## Quick Reference: Error Message Quality
+## ALWAYS / NEVER Rules
 
-```javascript
-// ❌ BAD - Technical, not actionable
-frappe.throw('NullPointerException in line 42');
-frappe.throw('Query failed');
-frappe.throw('Error');
+### ALWAYS
 
-// ✅ GOOD - Clear, actionable
-frappe.throw(__('Please select a customer before adding items'));
-frappe.throw(__('Amount {0} exceeds credit limit of {1}', [amount, limit]));
-frappe.throw(__('Could not save. Please check your internet connection and try again.'));
-```
+1. **Use the `frm` parameter** — NEVER use `cur_frm` [v14+]
+2. **Wrap async frappe.call in try/catch** — Unhandled rejections fail silently
+3. **Use `__()` for all user-facing strings** — Required for translation
+4. **Collect multiple validation errors** before calling `frappe.throw()`
+5. **Use `frappe.get_doc(cdt, cdn)`** to access child table rows in events
+6. **Put `frappe.throw()` only in `validate`** to prevent save
+7. **Check `r.message` for null** before accessing server response properties
+8. **Use `frappe.model.set_value(cdt, cdn, field, value)`** in child table events
+
+### NEVER
+
+1. **NEVER use `alert()`, `confirm()`, or `prompt()`** — Use frappe.msgprint / frappe.confirm
+2. **NEVER expose stack traces to users** — Log to console, show friendly message
+3. **NEVER use `cur_frm`** — It is unreliable and undefined in many contexts
+4. **NEVER leave `console.log` in production** — Use conditional `frappe.boot.developer_mode` check
+5. **NEVER mix `.then()` and `await`** in the same function — Pick one pattern
+6. **NEVER call `frm.set_value` in `setup`** — Form is not ready; use `refresh` or `onload`
+7. **NEVER ignore the `error` callback** on `frappe.call` when using callback style
 
 ---
 
@@ -426,14 +263,6 @@ frappe.throw(__('Could not save. Please check your internet connection and try a
 
 | File | Contents |
 |------|----------|
-| `references/patterns.md` | Complete error handling patterns |
-| `references/examples.md` | Full working examples |
-| `references/anti-patterns.md` | Common mistakes to avoid |
-
----
-
-## See Also
-
-- `frappe-syntax-clientscripts` - Client Script syntax
-- `frappe-impl-clientscripts` - Implementation workflows
-- `frappe-errors-serverscripts` - Server-side error handling
+| `references/examples.md` | Real error scenarios with diagnosis |
+| `references/anti-patterns.md` | Common mistakes with before/after fixes |
+| `references/patterns.md` | Defensive error handling patterns |

@@ -1,6 +1,6 @@
 # Permission Hooks Reference
 
-> Reference for frappe-core-permissions skill
+> Complete reference for has_permission and permission_query_conditions hooks.
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### Purpose
 
-Add custom permission logic for a DocType. Can only **deny** permission, not grant it.
+Add custom permission logic for a DocType. Can only **deny** permission, NEVER grant it.
 
 ### Configuration
 
@@ -25,30 +25,26 @@ has_permission = {
 ```python
 def my_permission_check(doc, ptype, user):
     """
-    Custom permission check.
-    
     Args:
         doc: Document object being checked
-        ptype: Permission type (read, write, create, delete, etc.)
-        user: User being checked
-    
+        ptype: Permission type (read, write, create, delete, submit, cancel)
+        user: User email being checked
+
     Returns:
-        None: No effect, continue standard checks
+        None: No effect — continue standard permission checks
         False: DENY permission
-        True: No effect in most versions (can grant in v15+)
+        True: No effect in most versions (NEVER rely on this to grant)
     """
     pass
 ```
 
 ### Examples
 
-#### Deny Access to Cancelled Documents
+#### Deny Editing Cancelled Documents
 
 ```python
-# myapp/permissions.py
 def sales_order_permission(doc, ptype, user):
-    """Deny non-managers access to cancelled orders."""
-    if doc.docstatus == 2:  # Cancelled
+    if doc.docstatus == 2 and ptype == "write":
         if "Sales Manager" not in frappe.get_roles(user):
             return False
     return None
@@ -58,7 +54,6 @@ def sales_order_permission(doc, ptype, user):
 
 ```python
 def time_based_permission(doc, ptype, user):
-    """Deny write access outside business hours."""
     if ptype == "write":
         hour = frappe.utils.now_datetime().hour
         if hour < 9 or hour > 18:
@@ -71,21 +66,19 @@ def time_based_permission(doc, ptype, user):
 
 ```python
 def approval_permission(doc, ptype, user):
-    """Only allow department head to approve high-value orders."""
     if ptype == "write" and doc.status == "Pending Approval":
-        if doc.grand_total > 100000:
-            if user != doc.department_head:
-                return False
+        if doc.grand_total > 100000 and user != doc.department_head:
+            return False
     return None
 ```
 
 ### Critical Rules
 
-1. **Can only deny** - Returning `True` has no effect in most versions
-2. **Return None by default** - To continue with standard checks
-3. **Don't throw errors** - Return `False` instead
-4. **Performance matters** - Called frequently, keep it fast
-5. **Check ptype** - Don't apply write logic to read checks
+1. **ALWAYS** return `None` by default — to continue standard checks
+2. **NEVER** return `True` to grant — it has no effect in most versions
+3. **NEVER** throw errors — return `False` to deny instead
+4. **ALWAYS** check `ptype` — do NOT apply write logic to read checks
+5. Keep hooks fast — they are called frequently during permission evaluation
 
 ---
 
@@ -93,7 +86,7 @@ def approval_permission(doc, ptype, user):
 
 ### Purpose
 
-Add WHERE clause conditions to `frappe.get_list()` queries.
+Add WHERE clause conditions to `frappe.get_list()` queries for row-level filtering.
 
 ### Configuration
 
@@ -101,7 +94,7 @@ Add WHERE clause conditions to `frappe.get_list()` queries.
 # hooks.py
 permission_query_conditions = {
     "ToDo": "myapp.permissions.todo_query",
-    "Sales Order": "myapp.permissions.sales_order_query"
+    "Customer": "myapp.permissions.customer_query"
 }
 ```
 
@@ -110,13 +103,12 @@ permission_query_conditions = {
 ```python
 def my_query_conditions(user):
     """
-    Return SQL WHERE clause fragment.
-    
     Args:
-        user: User making the query (can be None)
-    
+        user: User email (can be None — ALWAYS default to session user)
+
     Returns:
-        str: Valid SQL WHERE clause fragment, or empty string
+        str: Valid SQL WHERE clause fragment
+        "": Empty string for no restriction (NEVER return None)
     """
     pass
 ```
@@ -126,82 +118,68 @@ def my_query_conditions(user):
 #### Owner-Based Filter
 
 ```python
-# myapp/permissions.py
 def todo_query(user):
-    """Show only ToDos owned by or assigned by user."""
     if not user:
         user = frappe.session.user
-    
-    return """
-        (`tabToDo`.owner = {user} OR `tabToDo`.assigned_by = {user})
-    """.format(user=frappe.db.escape(user))
+    return """`tabToDo`.owner = {user} OR `tabToDo`.assigned_by = {user}""".format(
+        user=frappe.db.escape(user)
+    )
 ```
 
 #### Role-Based Filter
 
 ```python
-def sales_order_query(user):
-    """Filter Sales Orders based on user role."""
+def customer_query(user):
     if not user:
         user = frappe.session.user
-    
-    roles = frappe.get_roles(user)
-    
-    # Managers see all
-    if "Sales Manager" in roles:
+    if "Sales Manager" in frappe.get_roles(user):
         return ""
-    
-    # Regular users see only their own
-    return "`tabSales Order`.owner = {user}".format(
-        user=frappe.db.escape(user)
-    )
+    return "`tabCustomer`.owner = {user}".format(user=frappe.db.escape(user))
 ```
 
 #### Territory-Based Filter
 
 ```python
-def customer_query(user):
-    """Filter customers by user's allowed territories."""
+def customer_territory_query(user):
     if not user:
         user = frappe.session.user
-    
-    # Get user's territories from user permissions
+    if "Sales Manager" in frappe.get_roles(user):
+        return ""
+
     territories = frappe.get_all(
         "User Permission",
         filters={"user": user, "allow": "Territory"},
         pluck="for_value"
     )
-    
     if not territories:
-        return ""  # No restriction
-    
-    # Build IN clause
+        return ""
+
     territory_list = ", ".join([frappe.db.escape(t) for t in territories])
-    return "`tabCustomer`.territory IN ({})".format(territory_list)
+    return f"`tabCustomer`.territory IN ({territory_list})"
 ```
 
-#### Date-Based Filter
+#### Subquery Filter
 
 ```python
-def quotation_query(user):
-    """Only show quotations from last 90 days for regular users."""
+def project_query(user):
     if not user:
         user = frappe.session.user
-    
-    if "Sales Manager" in frappe.get_roles(user):
+    if "Projects Manager" in frappe.get_roles(user):
         return ""
-    
-    cutoff = frappe.utils.add_days(frappe.utils.today(), -90)
-    return "`tabQuotation`.creation >= '{}'".format(cutoff)
+    return """EXISTS (
+        SELECT 1 FROM `tabProject User`
+        WHERE `tabProject User`.parent = `tabProject`.name
+        AND `tabProject User`.user = {user}
+    )""".format(user=frappe.db.escape(user))
 ```
 
 ### Critical Rules
 
-1. **Only affects get_list** - Does NOT affect `frappe.get_all()`
-2. **Always escape input** - Use `frappe.db.escape()`
-3. **Return empty string for no filter** - Not `None`
-4. **Use backticks for identifiers** - `` `tabDocType`.fieldname ``
-5. **Handle None user** - Check and default to session user
+1. **ALWAYS** escape user input — `frappe.db.escape(user)`
+2. **ALWAYS** use backtick table prefixes — `` `tabDocType`.fieldname ``
+3. **ALWAYS** handle `None` user — default to `frappe.session.user`
+4. **ALWAYS** return empty string for no restriction — NEVER return `None`
+5. Only affects `get_list()` — does NOT affect `get_all()`
 
 ---
 
@@ -209,84 +187,28 @@ def quotation_query(user):
 
 | Method | User Permissions | permission_query_conditions |
 |--------|------------------|----------------------------|
-| `frappe.get_list()` | ✅ Applied | ✅ Applied |
-| `frappe.get_all()` | ❌ Ignored | ❌ Ignored |
-| `frappe.db.get_list()` | ✅ Applied | ✅ Applied |
-| `frappe.db.get_all()` | ❌ Ignored | ❌ Ignored |
-
-### When to Use Which
-
-```python
-# For user-facing queries - respects permissions
-docs = frappe.get_list("Sales Order", filters={"status": "Draft"})
-
-# For system queries - bypasses permissions
-docs = frappe.get_all("Sales Order", filters={"status": "Draft"})
-```
+| `frappe.get_list()` | Applied | Applied |
+| `frappe.get_all()` | Ignored | Ignored |
+| `frappe.db.get_list()` | Applied | Applied |
+| `frappe.db.get_all()` | Ignored | Ignored |
 
 ---
 
-## Combining Hooks
+## Combining Both Hooks
 
-### Example: Complete Permission System
+ALWAYS implement both hooks together for consistent behavior:
 
 ```python
 # hooks.py
 has_permission = {
     "Project": "myapp.permissions.project_permission"
 }
-
 permission_query_conditions = {
     "Project": "myapp.permissions.project_query"
 }
 ```
 
-```python
-# myapp/permissions.py
-
-def project_permission(doc, ptype, user):
-    """
-    Custom permission check for individual projects.
-    """
-    if not user:
-        user = frappe.session.user
-    
-    # Managers have full access
-    if "Projects Manager" in frappe.get_roles(user):
-        return None
-    
-    # Check if user is project member
-    is_member = frappe.db.exists(
-        "Project User",
-        {"parent": doc.name, "user": user}
-    )
-    
-    if not is_member:
-        return False
-    
-    return None
-
-
-def project_query(user):
-    """
-    Filter project list to only show accessible projects.
-    """
-    if not user:
-        user = frappe.session.user
-    
-    # Managers see all
-    if "Projects Manager" in frappe.get_roles(user):
-        return ""
-    
-    # Others see only projects they're members of
-    return """
-        EXISTS (
-            SELECT 1 FROM `tabProject User`
-            WHERE `tabProject User`.parent = `tabProject`.name
-            AND `tabProject User`.user = {user}
-        )
-    """.format(user=frappe.db.escape(user))
-```
+`has_permission` controls single-document access. `permission_query_conditions` controls list-view filtering. If they apply different logic, users see inconsistent results.
 
 ---
 
@@ -294,71 +216,45 @@ def project_query(user):
 
 1. Hooks from all installed apps are collected
 2. Order follows app installation order in `apps.txt`
-3. For `has_permission`: ALL hooks must pass (any False = denied)
+3. For `has_permission`: ALL hooks must pass (any `False` = denied)
 4. For `permission_query_conditions`: conditions are AND-ed together
-
----
-
-## Debugging Hooks
-
-### Log Permission Checks
-
-```python
-def sales_order_permission(doc, ptype, user):
-    frappe.logger().debug(
-        f"Permission check: {doc.doctype} {doc.name}, "
-        f"ptype={ptype}, user={user}"
-    )
-    # ... permission logic ...
-```
-
-### Test Query Conditions
-
-```python
-# In console
-from myapp.permissions import sales_order_query
-print(sales_order_query("john@example.com"))
-# Output: `tabSales Order`.owner = 'john@example.com'
-```
 
 ---
 
 ## Common Mistakes
 
-### ❌ SQL Injection
+### SQL Injection
 
 ```python
-# WRONG
+# WRONG — vulnerable
 def bad_query(user):
-    return f"owner = '{user}'"  # Vulnerable!
+    return f"owner = '{user}'"
 
-# CORRECT
+# CORRECT — escaped
 def good_query(user):
-    return f"owner = {frappe.db.escape(user)}"
+    return f"`tabCustomer`.owner = {frappe.db.escape(user)}"
 ```
 
-### ❌ Forgetting Table Prefix
+### Missing Table Prefix
 
 ```python
-# WRONG
+# WRONG — ambiguous column in joins
 def bad_query(user):
-    return f"owner = {frappe.db.escape(user)}"  # Ambiguous!
+    return f"owner = {frappe.db.escape(user)}"
 
-# CORRECT
+# CORRECT — explicit table
 def good_query(user):
     return f"`tabSales Order`.owner = {frappe.db.escape(user)}"
 ```
 
-### ❌ Throwing Errors in Hook
+### Throwing in Hook
 
 ```python
-# WRONG
+# WRONG — interrupts evaluation
 def bad_permission(doc, ptype, user):
-    if not allowed:
-        frappe.throw("Not allowed!")  # Don't do this!
+    frappe.throw("Not allowed!")
 
-# CORRECT
+# CORRECT — return False to deny
 def good_permission(doc, ptype, user):
-    if not allowed:
-        return False  # Just return False
+    return False
 ```

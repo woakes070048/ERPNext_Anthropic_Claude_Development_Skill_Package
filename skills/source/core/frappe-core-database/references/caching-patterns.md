@@ -1,230 +1,231 @@
 # Caching Patterns Reference
 
-## Redis Cache Basis
+> Redis cache, @redis_cache decorator, document caching, and invalidation strategies. Verified against Frappe v14-v16 docs.
 
-### Set en Get
+---
+
+## Document Caching
+
+### frappe.get_cached_doc(doctype, name)
+Returns cached Document object. Falls back to database if not in cache.
 ```python
-# Simpele waarde
+# ALWAYS use for read-only access to rarely-changing documents
+company = frappe.get_cached_doc('Company', 'My Company')
+settings = frappe.get_cached_doc('Selling Settings')
+
+# NEVER use when:
+# - You need to modify the document
+# - You need guaranteed up-to-date data
+# - You just saved changes to this document
+```
+
+### frappe.db.get_value with cache=True
+Caches single field lookups.
+```python
+country = frappe.db.get_value('Company', 'My Company', 'country', cache=True)
+```
+
+---
+
+## Redis Cache — Basic Operations
+
+### Set / Get / Delete
+```python
+# Simple value
 frappe.cache.set_value('my_key', 'my_value')
 value = frappe.cache.get_value('my_key')
 
-# Dict/lijst
+# Dict or list
 frappe.cache.set_value('user_data', {'name': 'Admin', 'role': 'System Manager'})
 data = frappe.cache.get_value('user_data')
 
-# Met expiry (seconden)
-frappe.cache.set_value('temp_key', 'value', expires_in_sec=3600)  # 1 uur
-frappe.cache.set_value('short_lived', 'value', expires_in_sec=300)  # 5 min
+# With expiry (seconds)
+frappe.cache.set_value('temp_key', 'value', expires_in_sec=3600)   # 1 hour
+frappe.cache.set_value('short_lived', 'value', expires_in_sec=300) # 5 min
+
+# Delete
+frappe.cache.delete_value('my_key')
 ```
 
-### Delete
+### Site-Specific Keys
+Frappe automatically prefixes all cache keys with the site name:
 ```python
-frappe.cache.delete_value('my_key')
+# Site: site1.example.com
+frappe.cache.set_value('key', 'value')
+# Actual Redis key: site1.example.com|key
+```
+This means the same key on different sites stores separate values.
+
+### Local Request Cache
+Within a single request, repeated `get_value` calls return from in-memory cache without hitting Redis:
+```python
+frappe.cache.get_value('key')  # Redis call
+frappe.cache.get_value('key')  # In-memory (no Redis call)
 ```
 
 ---
 
 ## Hash Operations
 
-Voor complexe objecten waar velden apart geüpdatet moeten worden.
+Use for complex objects where individual fields need independent updates.
 
 ```python
-# Set individuele velden
+# Set individual fields
 frappe.cache.hset('user|admin', 'name', 'Administrator')
 frappe.cache.hset('user|admin', 'email', 'admin@example.com')
-frappe.cache.hset('user|admin', 'last_login', '2024-01-15')
 
-# Get enkel veld
+# Get single field
 name = frappe.cache.hget('user|admin', 'name')
 
-# Get alle velden
+# Get all fields
 user_data = frappe.cache.hgetall('user|admin')
-# {'name': 'Administrator', 'email': 'admin@example.com', 'last_login': '2024-01-15'}
+# {'name': 'Administrator', 'email': 'admin@example.com'}
 
-# Delete veld
-frappe.cache.hdel('user|admin', 'last_login')
-```
-
----
-
-## Cached Document Access
-
-### get_cached_doc
-```python
-# Cached document - sneller dan get_doc
-doc = frappe.get_cached_doc('Company', 'My Company')
-
-# Gebruik wanneer:
-# - Document wijzigt niet vaak
-# - Read-only operaties
-# - Frequent opgevraagd
-
-# NIET gebruiken wanneer:
-# - Altijd actuele data nodig
-# - Direct na wijzigingen
-```
-
-### get_cached_value
-```python
-# Cached enkele waarde
-country = frappe.get_cached_value('Company', 'My Company', 'country')
+# Delete field
+frappe.cache.hdel('user|admin', 'name')
 ```
 
 ---
 
 ## @redis_cache Decorator
 
-### Basis Gebruik
+### Basic Usage
 ```python
 from frappe.utils.caching import redis_cache
 
 @redis_cache
 def expensive_calculation(param1, param2):
-    # Tijdrovende berekening
-    import time
-    time.sleep(2)
+    # Heavy computation
     return param1 + param2
 
-# Eerste call: 2 seconden
+# First call: executes function
 result = expensive_calculation(10, 20)
 
-# Volgende calls: instant (uit cache)
+# Subsequent calls with same args: returns from cache
 result = expensive_calculation(10, 20)
 ```
 
-### Met TTL (Time To Live)
+### With TTL (Time To Live)
 ```python
-@redis_cache(ttl=300)  # 5 minuten
+@redis_cache(ttl=300)    # 5 minutes
 def get_dashboard_data(user):
     return calculate_dashboard(user)
 
-@redis_cache(ttl=3600)  # 1 uur
+@redis_cache(ttl=3600)   # 1 hour
 def get_monthly_report(month, year):
     return generate_report(month, year)
 ```
 
-### Cache Invalideren
+### Cache Invalidation
 ```python
-@redis_cache
+@redis_cache(ttl=300)
 def get_user_stats(user):
     return calculate_stats(user)
 
-# Cache handmatig legen
+# Manually clear cache
 get_user_stats.clear_cache()
 ```
 
 ---
 
-## Cache Patterns
+## TTL Guidelines
 
-### Dashboard Data
+| Data type | TTL | Example |
+|-----------|-----|---------|
+| Static reference data | No TTL (manual invalidation) | Country list, currency codes |
+| Configuration | 3600s (1 hour) | System settings, company defaults |
+| Dashboard data | 300s (5 minutes) | Sales totals, task counts |
+| Active session data | 60s (1 minute) | Online users, active sessions |
+
+**RULE**: ALWAYS set a TTL unless you have explicit invalidation logic. Unbounded caches cause stale data bugs.
+
+---
+
+## Cache Invalidation Patterns
+
+### Pattern 1: Invalidate on Document Update
 ```python
-def get_dashboard_data():
-    cache_key = f"dashboard_{frappe.session.user}"
-    
-    # Check cache
+@redis_cache(ttl=3600)
+def get_company_settings(company):
+    return frappe.get_doc('Company', company)
+
+class Company(Document):
+    def on_update(self):
+        get_company_settings.clear_cache()
+```
+
+### Pattern 2: Key-Based Invalidation
+```python
+def get_dashboard_data(user):
+    cache_key = f"dashboard_{user}"
     data = frappe.cache.get_value(cache_key)
     if data:
         return data
-    
-    # Bereken als niet in cache
-    data = compute_dashboard()
-    
-    # Store met expiry
+
+    data = compute_dashboard(user)
     frappe.cache.set_value(cache_key, data, expires_in_sec=300)
-    
     return data
+
+class SalesInvoice(Document):
+    def on_submit(self):
+        # Invalidate dashboard for the invoice owner
+        frappe.cache.delete_value(f"dashboard_{self.owner}")
 ```
 
-### Invalidatie bij Wijziging
-```python
-class MyDocType(Document):
-    def on_update(self):
-        # Invalideer gerelateerde caches
-        frappe.cache.delete_value(f"stats_{self.user}")
-        frappe.cache.delete_value(f"dashboard_{self.user}")
-```
-
-### Bulk Cache
+### Pattern 3: Bulk Cache with Hash
 ```python
 def cache_all_companies():
-    companies = frappe.get_all('Company', fields=['name', 'country', 'currency'])
+    companies = frappe.get_all('Company', fields=['name', 'country', 'default_currency'])
     for company in companies:
         frappe.cache.hset('companies', company.name, company)
 
-def get_company_from_cache(name):
-    return frappe.cache.hget('companies', name)
+def get_company_cached(name):
+    data = frappe.cache.hget('companies', name)
+    if not data:
+        data = frappe.db.get_value('Company', name, ['name', 'country', 'default_currency'], as_dict=True)
+        frappe.cache.hset('companies', name, data)
+    return data
 ```
 
----
-
-## Best Practices
-
-### 1. Kies Juiste TTL
+### Pattern 4: Graceful Degradation
 ```python
-# Configuratie data - lange TTL
-@redis_cache(ttl=3600)  # 1 uur
-def get_system_settings():
-    pass
-
-# Snel veranderende data - korte TTL
-@redis_cache(ttl=60)  # 1 minuut
-def get_active_users():
-    pass
-
-# Statische data - geen TTL (tot handmatige invalidatie)
-@redis_cache
-def get_country_list():
-    pass
-```
-
-### 2. Goede Cache Keys
-```python
-# ✅ Duidelijk en uniek
-cache_key = f"user_stats_{user}_{month}_{year}"
-cache_key = f"report_{report_type}_{date}"
-
-# ❌ Te generiek
-cache_key = "stats"
-cache_key = "data"
-```
-
-### 3. Graceful Degradation
-```python
-def get_data_with_fallback():
+def get_data_with_fallback(key):
     try:
-        data = frappe.cache.get_value('my_key')
+        data = frappe.cache.get_value(key)
         if data:
             return data
     except Exception:
-        pass  # Redis down, fallback naar database
-    
-    return fetch_from_database()
-```
+        pass  # Redis down — fall back to database
 
-### 4. Client-side Cache
-Frappe implementeert automatisch client-side caching in `frappe.local.cache` om herhaalde Redis calls binnen één request te voorkomen.
-
-```python
-# Binnen één request:
-frappe.cache.get_value('key')  # Redis call
-frappe.cache.get_value('key')  # Uit local cache (geen Redis call)
+    return fetch_from_database(key)
 ```
 
 ---
 
-## Site-Specific Keys
+## Anti-Patterns
 
-Frappe prefixed automatisch alle cache keys met site context:
-
+### NEVER: Cache Without Invalidation
 ```python
-# Site: site1.example.com
-frappe.cache.set_value('key', 'value')
-# Werkelijke key: site1.example.com|key
-
-# Site: site2.example.com  
-frappe.cache.set_value('key', 'value')
-# Werkelijke key: site2.example.com|key
+# ❌ Cache never cleared — stale data guaranteed
+@redis_cache
+def get_settings():
+    return frappe.get_doc('My Settings')
 ```
 
-Dit betekent dat dezelfde key op verschillende sites aparte waarden kan hebben.
+### NEVER: Generic Cache Keys
+```python
+# ❌ Collisions and confusion
+frappe.cache.set_value('data', result)
+
+# ✅ Specific, namespaced keys
+frappe.cache.set_value(f"sales_report_{user}_{month}", result)
+```
+
+### NEVER: Cache Large Objects Unnecessarily
+```python
+# ❌ Caching full document with all children
+frappe.cache.set_value('invoice', frappe.get_doc('Sales Invoice', 'SINV-001'))
+
+# ✅ Cache only what you need
+frappe.cache.set_value('invoice_total', {'name': 'SINV-001', 'total': 50000})
+```

@@ -1,4 +1,4 @@
-# Anti-Patterns - Database Error Handling
+# Anti-Patterns — Database Error Handling
 
 Common mistakes to avoid when handling database errors in Frappe/ERPNext.
 
@@ -6,444 +6,405 @@ Common mistakes to avoid when handling database errors in Frappe/ERPNext.
 
 ## 1. SQL Injection via String Formatting
 
-### ❌ WRONG
-
+### Problem
 ```python
-# CRITICAL SECURITY VULNERABILITY!
-def get_customer(customer_name):
-    query = f"SELECT * FROM `tabCustomer` WHERE name = '{customer_name}'"
-    return frappe.db.sql(query)
-
-# Also wrong with .format()
+# ALL of these are SQL INJECTION vulnerabilities
+query = f"SELECT * FROM `tabCustomer` WHERE name = '{customer_name}'"
 query = "SELECT * FROM `tabCustomer` WHERE name = '{}'".format(customer_name)
+query = "SELECT * FROM `tabCustomer` WHERE name = '%s'" % customer_name
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_customer(customer_name):
-    # Parameterized query
-    return frappe.db.sql(
-        "SELECT * FROM `tabCustomer` WHERE name = %(name)s",
-        {"name": customer_name},
-        as_dict=True
-    )
+# ALWAYS use named parameters with dict
+frappe.db.sql(
+    "SELECT * FROM `tabCustomer` WHERE name = %(name)s",
+    {"name": customer_name},
+    as_dict=True
+)
 
-# Or use the ORM
-customer = frappe.db.get_value("Customer", customer_name, "*", as_dict=True)
+# Or use ORM — no injection risk
+frappe.db.get_value("Customer", customer_name, "*", as_dict=True)
 ```
 
-**Why**: String formatting allows SQL injection attacks. Always use parameterized queries.
+**Why**: String formatting allows SQL injection. ALWAYS use `%(name)s` with dict params.
 
 ---
 
-## 2. Not Checking Existence Before get_doc
+## 2. Using %s Instead of %(name)s
 
-### ❌ WRONG
-
+### Problem
 ```python
-def update_customer(customer_name, data):
-    # Crashes with DoesNotExistError if customer doesn't exist!
-    doc = frappe.get_doc("Customer", customer_name)
-    doc.update(data)
-    doc.save()
+# Positional %s is fragile and error-prone
+frappe.db.sql(
+    "SELECT * FROM `tabItem` WHERE name = %s AND warehouse = %s",
+    ("ITEM-001", "Main")
+)
+# Easy to get parameter order wrong!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def update_customer(customer_name, data):
-    if not frappe.db.exists("Customer", customer_name):
-        frappe.throw(_("Customer '{0}' not found").format(customer_name))
-    
-    doc = frappe.get_doc("Customer", customer_name)
-    doc.update(data)
-    doc.save()
+# Named parameters are self-documenting and order-independent
+frappe.db.sql(
+    "SELECT * FROM `tabItem` WHERE name = %(name)s AND warehouse = %(wh)s",
+    {"name": "ITEM-001", "wh": "Main"},
+    as_dict=True
+)
 ```
 
-**Why**: get_doc throws DoesNotExistError. Check first or catch the exception.
+**Why**: Named parameters prevent order-dependent bugs and are clearer to read.
 
 ---
 
-## 3. Ignoring DuplicateEntryError on Insert
+## 3. Not Checking get_value() for None
 
-### ❌ WRONG
-
+### Problem
 ```python
-def create_customer(data):
-    # Crashes on duplicate!
+credit = frappe.db.get_value("Customer", "CUST-001", "credit_limit")
+if credit > 1000:  # TypeError if customer not found (None > 1000)
+    apply_discount()
+```
+
+### Fix
+```python
+credit = frappe.db.get_value("Customer", "CUST-001", "credit_limit")
+if credit is None:
+    frappe.throw(_("Customer not found"))
+credit = credit or 0
+if credit > 1000:
+    apply_discount()
+```
+
+**Why**: `get_value()` returns None when record not found. ALWAYS check before using.
+
+---
+
+## 4. Not Checking Existence Before get_doc
+
+### Problem
+```python
+# Crashes with DoesNotExistError
+doc = frappe.get_doc("Customer", customer_name)
+doc.update(data)
+doc.save()
+```
+
+### Fix
+```python
+if not frappe.db.exists("Customer", customer_name):
+    frappe.throw(_("Customer not found"))
+doc = frappe.get_doc("Customer", customer_name)
+doc.update(data)
+doc.save()
+```
+
+**Why**: `get_doc()` raises DoesNotExistError. Check first or catch the exception.
+
+---
+
+## 5. Ignoring DuplicateEntryError on Insert
+
+### Problem
+```python
+doc = frappe.get_doc({"doctype": "Customer", **data})
+doc.insert()  # Crashes on duplicate!
+```
+
+### Fix
+```python
+try:
     doc = frappe.get_doc({"doctype": "Customer", **data})
     doc.insert()
-    return doc.name
+except frappe.DuplicateEntryError:
+    existing = frappe.db.get_value("Customer", {"customer_name": data.get("customer_name")})
+    return {"name": existing, "existing": True}
 ```
 
-### ✅ CORRECT
-
-```python
-def create_customer(data):
-    try:
-        doc = frappe.get_doc({"doctype": "Customer", **data})
-        doc.insert()
-        return {"success": True, "name": doc.name}
-    except frappe.DuplicateEntryError:
-        existing = frappe.db.get_value("Customer", {"customer_name": data.get("customer_name")})
-        return {"success": True, "name": existing, "existing": True}
-```
-
-**Why**: Unique constraints cause DuplicateEntryError. Handle gracefully.
+**Why**: Unique constraints cause DuplicateEntryError. Handle it on every insert.
 
 ---
 
-## 4. Assuming db.set_value Always Works
+## 6. Assuming db.set_value Always Works
 
-### ❌ WRONG
-
+### Problem
 ```python
-def mark_as_synced(customer_name):
-    # Silently does nothing if customer doesn't exist!
-    frappe.db.set_value("Customer", customer_name, "synced", 1)
-    return "Success"  # Lies!
+frappe.db.set_value("Customer", "NONEXISTENT", "synced", 1)
+return "Success"  # LIE — nothing was updated
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def mark_as_synced(customer_name):
-    if not frappe.db.exists("Customer", customer_name):
-        frappe.throw(_("Customer '{0}' not found").format(customer_name))
-    
-    frappe.db.set_value("Customer", customer_name, "synced", 1)
-    return "Success"
+if not frappe.db.exists("Customer", customer_name):
+    frappe.throw(_("Customer not found"))
+frappe.db.set_value("Customer", customer_name, "synced", 1)
 ```
 
-**Why**: db.set_value doesn't raise error if record doesn't exist. Verify first.
+**Why**: `db.set_value()` silently does nothing if record doesn't exist.
 
 ---
 
-## 5. Committing in Controller Hooks
+## 7. Committing in Controller Hooks
 
-### ❌ WRONG
-
+### Problem
 ```python
 class SalesOrder(Document):
     def validate(self):
         self.calculate_totals()
-        frappe.db.commit()  # BREAKS TRANSACTION!
-    
+        frappe.db.commit()  # BREAKS transaction!
+
     def on_update(self):
-        self.update_linked()
-        frappe.db.commit()  # DON'T DO THIS!
+        frappe.db.commit()  # ALSO WRONG
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 class SalesOrder(Document):
     def validate(self):
         self.calculate_totals()
-        # No commit - framework handles it
-    
+        # Framework handles commit
+
     def on_update(self):
         self.update_linked()
-        # No commit - framework handles it
+        # Framework handles commit
 ```
 
-**Why**: Manual commits in controllers break transaction management and can cause partial saves.
+**Why**: Manual commits break transaction management. Frappe auto-commits after web requests.
 
 ---
 
-## 6. Missing Commit in Background Jobs
+## 8. Missing Commit in Background Jobs
 
-### ❌ WRONG
-
+### Problem
 ```python
 def background_sync():
     for item in frappe.get_all("Item", limit=100):
         frappe.db.set_value("Item", item.name, "synced", 1)
-    
-    # Missing commit - ALL CHANGES LOST!
+    # ALL CHANGES LOST — no auto-commit in background!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 def background_sync():
     for item in frappe.get_all("Item", limit=100):
         frappe.db.set_value("Item", item.name, "synced", 1)
-    
-    frappe.db.commit()  # REQUIRED!
+    frappe.db.commit()  # REQUIRED
 ```
 
-**Why**: Background jobs don't auto-commit. Always commit explicitly.
+**Why**: Background jobs and scheduler tasks have no auto-commit.
 
 ---
 
-## 7. Swallowing Database Errors
+## 9. Swallowing Database Errors
 
-### ❌ WRONG
-
+### Problem
 ```python
-def update_customer(name, data):
-    try:
-        doc = frappe.get_doc("Customer", name)
-        doc.update(data)
-        doc.save()
-    except Exception:
-        pass  # Silent failure - impossible to debug!
+try:
+    doc = frappe.get_doc("Customer", name)
+    doc.save()
+except Exception:
+    pass  # Silent failure — impossible to debug
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def update_customer(name, data):
-    try:
-        doc = frappe.get_doc("Customer", name)
-        doc.update(data)
-        doc.save()
-    except frappe.DoesNotExistError:
-        frappe.throw(_("Customer not found"))
-    except frappe.ValidationError as e:
-        frappe.throw(str(e))
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Customer Update Error")
-        frappe.throw(_("An error occurred. Please try again."))
+try:
+    doc = frappe.get_doc("Customer", name)
+    doc.save()
+except frappe.DoesNotExistError:
+    frappe.throw(_("Customer not found"))
+except frappe.TimestampMismatchError:
+    frappe.throw(_("Modified by another user. Refresh and retry."))
+except frappe.ValidationError as e:
+    frappe.throw(str(e))
+except Exception:
+    frappe.log_error(frappe.get_traceback(), "Customer Save Error")
+    frappe.throw(_("An error occurred"))
 ```
 
-**Why**: Silent failures make debugging impossible. Always log or re-raise.
+**Why**: Catch specific exceptions first. NEVER silently swallow errors.
 
 ---
 
-## 8. Not Handling Empty Query Results
+## 10. Not Handling Empty Query Results
 
-### ❌ WRONG
-
+### Problem
 ```python
-def get_latest_invoice(customer):
-    result = frappe.db.sql("""
-        SELECT name FROM `tabSales Invoice`
-        WHERE customer = %s
-        ORDER BY posting_date DESC
-        LIMIT 1
-    """, customer)
-    
-    return result[0][0]  # IndexError if no results!
+result = frappe.db.sql("SELECT name FROM `tabSales Invoice` WHERE customer = %s LIMIT 1", customer)
+return result[0][0]  # IndexError if no results!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_latest_invoice(customer):
-    result = frappe.db.sql("""
-        SELECT name FROM `tabSales Invoice`
-        WHERE customer = %s
-        ORDER BY posting_date DESC
-        LIMIT 1
-    """, customer)
-    
-    return result[0][0] if result else None
+result = frappe.db.sql("SELECT name FROM `tabSales Invoice` WHERE customer = %(c)s LIMIT 1",
+                       {"c": customer})
+return result[0][0] if result else None
 ```
 
-**Why**: Empty result sets cause IndexError. Always check before accessing.
+**Why**: Empty result sets cause IndexError. ALWAYS check before accessing.
 
 ---
 
-## 9. N+1 Query Pattern
+## 11. N+1 Query Pattern
 
-### ❌ WRONG
-
+### Problem
 ```python
-def get_customer_details(customer_names):
+def get_details(names):
     details = []
-    for name in customer_names:
-        # N queries for N customers!
-        doc = frappe.get_doc("Customer", name)
+    for name in names:
+        doc = frappe.get_doc("Customer", name)  # N queries!
         details.append(doc.as_dict())
     return details
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_customer_details(customer_names):
-    # Single query for all customers
+def get_details(names):
     return frappe.get_all(
         "Customer",
-        filters={"name": ["in", customer_names]},
-        fields=["name", "customer_name", "credit_limit", "territory"]
-    )
+        filters={"name": ["in", names]},
+        fields=["name", "customer_name", "credit_limit"]
+    )  # 1 query!
 ```
 
-**Why**: N+1 queries are extremely slow. Batch fetch instead.
+**Why**: N+1 queries are extremely slow. ALWAYS batch fetch.
 
 ---
 
-## 10. No Limit on Queries
+## 12. No Limit on Queries
 
-### ❌ WRONG
-
+### Problem
 ```python
-def get_all_invoices():
-    # Could return millions of rows!
-    return frappe.get_all("Sales Invoice")
+all_invoices = frappe.get_all("Sales Invoice")  # Could return millions!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_all_invoices(page=1, page_size=100):
-    return frappe.get_all(
-        "Sales Invoice",
-        limit_start=(page - 1) * page_size,
-        limit_page_length=page_size
-    )
+invoices = frappe.get_all("Sales Invoice", limit=100)
+# Or paginate:
+invoices = frappe.get_all("Sales Invoice", limit_start=0, limit_page_length=100)
 ```
 
-**Why**: Unbounded queries can crash the system. Always paginate.
+**Why**: Unbounded queries cause memory exhaustion and timeouts.
 
 ---
 
-## 11. Catching Generic Exception for Specific Errors
+## 13. Exposing Database Errors to Users
 
-### ❌ WRONG
-
+### Problem
 ```python
-def delete_customer(name):
-    try:
-        frappe.delete_doc("Customer", name)
-    except Exception as e:
-        # Catches everything - hard to handle appropriately
-        frappe.throw(str(e))
+try:
+    return frappe.db.sql(query, filters)
+except Exception as e:
+    frappe.throw(str(e))  # Exposes SQL details!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def delete_customer(name):
-    try:
-        frappe.delete_doc("Customer", name)
-    except frappe.DoesNotExistError:
-        frappe.throw(_("Customer not found"))
-    except frappe.LinkExistsError:
-        frappe.throw(_("Cannot delete - linked documents exist"))
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Delete Error")
-        frappe.throw(_("Delete failed. Please contact support."))
+try:
+    return frappe.db.sql(query, filters)
+except frappe.db.InternalError:
+    frappe.log_error(frappe.get_traceback(), "Query Error")
+    frappe.throw(_("Database error. Please contact support."))
 ```
 
-**Why**: Specific exceptions allow specific handling and better error messages.
+**Why**: Database error messages can expose table names, column names, and SQL structure.
 
 ---
 
-## 12. Exposing Database Errors to Users
+## 14. Race Condition on Get-or-Create
 
-### ❌ WRONG
-
+### Problem
 ```python
-def run_report(filters):
-    try:
-        return frappe.db.sql(query, filters)
-    except Exception as e:
-        frappe.throw(str(e))  # Exposes SQL error details!
-```
-
-### ✅ CORRECT
-
-```python
-def run_report(filters):
-    try:
-        return frappe.db.sql(query, filters)
-    except frappe.db.InternalError as e:
-        frappe.log_error(frappe.get_traceback(), "Report Query Error")
-        frappe.throw(_("Error generating report. Please try again."))
-```
-
-**Why**: Database error messages can expose sensitive information.
-
----
-
-## 13. Race Condition on Get-or-Create
-
-### ❌ WRONG
-
-```python
-def get_or_create_customer(name):
+def get_or_create(name):
     if not frappe.db.exists("Customer", name):
-        # Race condition! Another process might create it here
         doc = frappe.get_doc({"doctype": "Customer", "customer_name": name})
-        doc.insert()  # DuplicateEntryError!
-        return doc
+        doc.insert()  # DuplicateEntryError — someone else created it!
     return frappe.get_doc("Customer", name)
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_or_create_customer(name):
+def get_or_create(name):
     if not frappe.db.exists("Customer", name):
         try:
             doc = frappe.get_doc({"doctype": "Customer", "customer_name": name})
             doc.insert()
-            return doc
         except frappe.DuplicateEntryError:
-            # Race condition - someone else created it
-            pass
-    
+            pass  # Race condition — someone else created it
     return frappe.get_doc("Customer", name)
 ```
 
-**Why**: Between exists() check and insert(), another process might create the record.
+**Why**: Between `exists()` and `insert()`, another process can create the record.
 
 ---
 
-## 14. Not Handling Concurrent Edits
+## 15. Not Handling Concurrent Edits
 
-### ❌ WRONG
-
+### Problem
 ```python
-def update_customer(name, data):
+doc = frappe.get_doc("Customer", name)
+doc.update(data)
+doc.save()  # TimestampMismatchError if modified by another user!
+```
+
+### Fix
+```python
+try:
     doc = frappe.get_doc("Customer", name)
     doc.update(data)
-    doc.save()  # TimestampMismatchError if modified by another user!
+    doc.save()
+except frappe.TimestampMismatchError:
+    frappe.throw(_("Document modified. Please refresh and try again."))
 ```
 
-### ✅ CORRECT
-
-```python
-def update_customer(name, data):
-    try:
-        doc = frappe.get_doc("Customer", name)
-        doc.update(data)
-        doc.save()
-    except frappe.TimestampMismatchError:
-        frappe.throw(
-            _("This document was modified by another user. Please refresh and try again.")
-        )
-```
-
-**Why**: Concurrent edits cause TimestampMismatchError. Handle gracefully.
+**Why**: Concurrent edits cause TimestampMismatchError. Handle gracefully in APIs.
 
 ---
 
-## 15. Using get_doc When get_value Suffices
+## 16. Using get_doc When get_value Suffices
 
-### ❌ WRONG
-
+### Problem
 ```python
-def get_customer_credit_limit(name):
-    # Loads entire document just for one field!
-    doc = frappe.get_doc("Customer", name)
-    return doc.credit_limit
+# Loads ENTIRE document just for one field
+doc = frappe.get_doc("Customer", name)
+return doc.credit_limit
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def get_customer_credit_limit(name):
-    # Only fetches the needed field
-    return frappe.db.get_value("Customer", name, "credit_limit") or 0
+# Only fetches the needed field
+return frappe.db.get_value("Customer", name, "credit_limit") or 0
 ```
 
-**Why**: get_doc loads entire document. Use get_value for single fields.
+**Why**: `get_doc()` loads entire document with children. Use `get_value()` for single fields.
+
+---
+
+## 17. Catching Generic Exception for All DB Errors
+
+### Problem
+```python
+try:
+    frappe.delete_doc("Customer", name)
+except Exception as e:
+    frappe.throw(str(e))  # No specific handling
+```
+
+### Fix
+```python
+try:
+    frappe.delete_doc("Customer", name)
+except frappe.DoesNotExistError:
+    frappe.throw(_("Customer not found"))
+except frappe.LinkExistsError:
+    frappe.throw(_("Cannot delete — linked documents exist"))
+except Exception:
+    frappe.log_error(frappe.get_traceback(), "Delete Error")
+    frappe.throw(_("Delete failed. Contact support."))
+```
+
+**Why**: Specific exceptions allow specific error messages and recovery strategies.
 
 ---
 
@@ -451,17 +412,18 @@ def get_customer_credit_limit(name):
 
 Before deploying:
 
-- [ ] All SQL queries use parameterized values (no string formatting)
-- [ ] Existence checked before get_doc (or exception caught)
-- [ ] DuplicateEntryError handled on insert
-- [ ] db.set_value preceded by existence check
-- [ ] No frappe.db.commit() in controller hooks
-- [ ] frappe.db.commit() in background jobs
+- [ ] All SQL uses `%(name)s` with dict (no string formatting)
+- [ ] `get_value()` results checked for None
+- [ ] Existence checked before `get_doc()` (or exception caught)
+- [ ] `DuplicateEntryError` handled on every `insert()`
+- [ ] `TimestampMismatchError` handled on `save()` in APIs
+- [ ] `db.set_value()` preceded by existence check
+- [ ] No `frappe.db.commit()` in controller hooks / doc_events
+- [ ] `frappe.db.commit()` in background/scheduler tasks
 - [ ] Database errors logged, not swallowed
 - [ ] Empty results handled (no blind array access)
-- [ ] Queries have limits (pagination)
+- [ ] Queries have limits / pagination
 - [ ] Specific exceptions caught before generic Exception
 - [ ] Database errors not exposed to users
 - [ ] Race conditions handled on get-or-create
-- [ ] TimestampMismatchError handled for saves
-- [ ] get_value used instead of get_doc for single fields
+- [ ] `get_value()` used instead of `get_doc()` for single fields

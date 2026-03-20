@@ -1,12 +1,21 @@
 # REST API Reference
 
-## Base URL
+> Complete reference for Frappe REST API (resource-based CRUD).
 
-```
-https://{your-instance}/api/resource/{doctype}
-```
+---
 
-## Standard Headers
+## API Versions
+
+| Version | Prefix | Available |
+|---------|--------|-----------|
+| v1 | `/api/resource/{doctype}` | All versions |
+| v2 | `/api/v2/document/{doctype}` | [v15+] |
+
+The v1 API continues to work in v15+. Use v2 for new integrations targeting v15+.
+
+---
+
+## Required Headers
 
 **ALWAYS** include for JSON responses:
 
@@ -17,6 +26,8 @@ headers = {
     'Authorization': 'token api_key:api_secret'
 }
 ```
+
+Without `Accept: application/json`, Frappe MAY return HTML instead of JSON.
 
 ---
 
@@ -32,37 +43,63 @@ GET /api/resource/{doctype}
 
 ### Query Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `fields` | JSON array | Fields to retrieve |
-| `filters` | JSON array | Filter conditions |
-| `or_filters` | JSON array | OR filter conditions |
-| `order_by` | string | Sorting (e.g., "modified desc") |
-| `limit_start` | int | Offset for pagination |
-| `limit_page_length` | int | Number of results |
-| `limit` | int | Alias for limit_page_length (v15+) |
-| `as_dict` | bool | Response as dict (default) |
-| `debug` | bool | Show SQL query |
-| `expand_links` | bool | Expand linked documents (v15+) |
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `fields` | JSON array | Fields to retrieve | `["name"]` |
+| `filters` | JSON array | AND filter conditions | none |
+| `or_filters` | JSON array | OR filter conditions | none |
+| `order_by` | string | Sort expression | `modified desc` |
+| `limit_start` | int | Offset for pagination | `0` |
+| `limit_page_length` | int | Number of results | `20` |
+| `limit` | int | Alias for limit_page_length [v15+] | — |
+| `as_dict` | bool | Response as dict (default) | `true` |
+| `debug` | bool | Include SQL query in response | `false` |
 
-### Filter Operators
+### Filter Syntax
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `=` | Equal to | `["status", "=", "Open"]` |
-| `!=` | Not equal | `["status", "!=", "Cancelled"]` |
-| `>` | Greater than | `["amount", ">", 1000]` |
-| `<` | Less than | `["amount", "<", 500]` |
-| `>=` | Greater or equal | `["date", ">=", "2024-01-01"]` |
-| `<=` | Less or equal | `["date", "<=", "2024-12-31"]` |
-| `like` | SQL LIKE | `["name", "like", "%INV%"]` |
-| `not like` | SQL NOT LIKE | `["name", "not like", "%TEST%"]` |
-| `in` | In list | `["status", "in", ["Open", "Pending"]]` |
-| `not in` | Not in list | `["status", "not in", ["Cancelled"]]` |
-| `is` | NULL check | `["ref", "is", "set"]` or `["ref", "is", "not set"]` |
-| `between` | Between values | `["amount", "between", [100, 500]]` |
+Filters MUST be a JSON array. Each condition is `[field, operator, value]` or `[doctype, field, operator, value]`.
 
-### Example: Filtered List
+```python
+# Equality
+filters = [["status", "=", "Open"]]
+
+# Comparison
+filters = [["amount", ">", 1000]]
+filters = [["amount", ">=", 500]]
+filters = [["amount", "<", 10000]]
+filters = [["amount", "<=", 999]]
+
+# Not equal
+filters = [["status", "!=", "Cancelled"]]
+
+# Pattern matching
+filters = [["name", "like", "%INV%"]]
+filters = [["name", "not like", "%TEST%"]]
+
+# List membership
+filters = [["status", "in", ["Open", "Pending"]]]
+filters = [["status", "not in", ["Cancelled", "Closed"]]]
+
+# NULL checks
+filters = [["reference", "is", "set"]]         # NOT NULL
+filters = [["reference", "is", "not set"]]      # IS NULL
+
+# Range
+filters = [["date", "between", ["2024-01-01", "2024-12-31"]]]
+```
+
+Full operator list: `=`, `!=`, `>`, `<`, `>=`, `<=`, `like`, `not like`, `in`, `not in`, `is`, `between`.
+
+### OR Filters
+
+```
+GET /api/resource/Customer?or_filters=[
+    ["customer_group","=","Commercial"],
+    ["customer_group","=","Individual"]
+]
+```
+
+### Example: Filtered + Paginated List
 
 ```bash
 GET /api/resource/Sales Invoice
@@ -70,18 +107,14 @@ GET /api/resource/Sales Invoice
     &filters=[["status","=","Paid"],["grand_total",">",1000]]
     &order_by=posting_date desc
     &limit_page_length=50
+    &limit_start=0
 ```
 
-**Response:**
+Response:
 ```json
 {
     "data": [
-        {
-            "name": "SINV-00001",
-            "customer": "Customer A",
-            "grand_total": 1500.00,
-            "status": "Paid"
-        }
+        {"name": "SINV-00001", "customer": "Customer A", "grand_total": 1500.00, "status": "Paid"}
     ]
 }
 ```
@@ -89,8 +122,7 @@ GET /api/resource/Sales Invoice
 ### Python Example
 
 ```python
-import requests
-import json
+import requests, json
 
 params = {
     'fields': json.dumps(["name", "customer", "grand_total"]),
@@ -99,11 +131,8 @@ params = {
     'order_by': 'modified desc'
 }
 
-response = requests.get(
-    'https://erp.example.com/api/resource/Sales Invoice',
-    params=params,
-    headers=headers
-)
+response = requests.get(f'{BASE_URL}/api/resource/Sales Invoice',
+                        params=params, headers=headers)
 data = response.json()['data']
 ```
 
@@ -115,18 +144,13 @@ data = response.json()['data']
 GET /api/resource/{doctype}/{name}
 ```
 
-```bash
-GET /api/resource/Customer/CUST-00001
-```
-
-**Response:**
+Response includes all fields and child table data:
 ```json
 {
     "data": {
         "name": "CUST-00001",
         "customer_name": "Test Customer",
-        "customer_group": "Commercial",
-        "items": [...]  // Child table data included
+        "items": [...]
     }
 }
 ```
@@ -137,61 +161,25 @@ GET /api/resource/Customer/CUST-00001
 
 ```
 POST /api/resource/{doctype}
+Content-Type: application/json
 ```
 
-**Body:** JSON object with fields
+Body: JSON object with field values.
+
+### With Child Table
 
 ```python
-data = {
-    "customer_name": "New Customer",
-    "customer_type": "Company",
-    "customer_group": "Commercial"
-}
-
-response = requests.post(
-    'https://erp.example.com/api/resource/Customer',
-    json=data,
-    headers=headers
-)
-```
-
-**Response:**
-```json
-{
-    "data": {
-        "name": "New Customer",
-        "owner": "Administrator",
-        "creation": "2024-01-15 10:30:00",
-        "customer_name": "New Customer"
-    }
-}
-```
-
-### Create with Child Table
-
-```python
-data = {
-    "customer": "CUST-00001",
+requests.post(f'{BASE_URL}/api/resource/Sales Order', json={
+    "customer": "CUST-001",
+    "delivery_date": "2024-02-01",
     "items": [
-        {
-            "item_code": "ITEM-001",
-            "qty": 5,
-            "rate": 100
-        },
-        {
-            "item_code": "ITEM-002",
-            "qty": 2,
-            "rate": 250
-        }
+        {"item_code": "ITEM-001", "qty": 5, "rate": 100},
+        {"item_code": "ITEM-002", "qty": 2, "rate": 250}
     ]
-}
-
-response = requests.post(
-    'https://erp.example.com/api/resource/Sales Order',
-    json=data,
-    headers=headers
-)
+}, headers=headers)
 ```
+
+Response: full document with generated `name`, `owner`, `creation` fields.
 
 ---
 
@@ -201,34 +189,21 @@ response = requests.post(
 PUT /api/resource/{doctype}/{name}
 ```
 
-**Body:** Only fields that need to be changed
+Only specified fields are changed (PATCH-like behavior):
 
 ```python
-data = {"customer_group": "Premium"}
-
-response = requests.put(
-    'https://erp.example.com/api/resource/Customer/CUST-00001',
-    json=data,
-    headers=headers
-)
+requests.put(f'{BASE_URL}/api/resource/Customer/CUST-001',
+             json={"customer_group": "Premium"}, headers=headers)
 ```
 
-### Update Child Table Items
+### Update Child Table
 
 ```python
 # Replace entire child table
-data = {
-    "items": [
-        {"item_code": "ITEM-001", "qty": 10}  # All other items are removed
-    ]
-}
+{"items": [{"item_code": "ITEM-001", "qty": 10}]}  # All others removed
 
-# Update specific child item (via name)
-data = {
-    "items": [
-        {"name": "abc123", "qty": 10}  # Update existing item
-    ]
-}
+# Update specific child row (by row name)
+{"items": [{"name": "row_id_abc", "qty": 10}]}  # Only this row updated
 ```
 
 ---
@@ -239,96 +214,88 @@ data = {
 DELETE /api/resource/{doctype}/{name}
 ```
 
-```bash
-DELETE /api/resource/Customer/CUST-00001
-```
-
-**Response:**
-```json
-{"message": "ok"}
-```
+Response: `{"message": "ok"}`
 
 ---
 
 ## Pagination Pattern
 
 ```python
-def get_all_records(doctype, filters=None, page_size=100):
-    """Retrieve all records with pagination."""
-    all_data = []
-    offset = 0
-    
+def get_all_records(doctype, base_url, headers, filters=None, page_size=100):
+    all_data, offset = [], 0
     while True:
         params = {
             'filters': json.dumps(filters or []),
             'limit_start': offset,
             'limit_page_length': page_size
         }
-        
-        response = requests.get(
-            f'https://erp.example.com/api/resource/{doctype}',
-            params=params,
-            headers=headers
-        )
-        
+        response = requests.get(f'{base_url}/api/resource/{doctype}',
+                                params=params, headers=headers)
         data = response.json().get('data', [])
         if not data:
             break
-            
         all_data.extend(data)
+        if len(data) < page_size:
+            break  # Last page
         offset += page_size
-    
     return all_data
-```
-
----
-
-## Expand Links (v15+)
-
-Automatically retrieve related documents.
-
-```bash
-# Single document
-GET /api/resource/Sales Invoice/SINV-00001?expand_links=True
-
-# Listing with specific links
-GET /api/resource/Sales Invoice?expand=["customer"]
 ```
 
 ---
 
 ## File Upload
 
-```bash
-POST /api/method/upload_file
-Content-Type: multipart/form-data
-```
-
 ```python
-files = {
-    'file': ('document.pdf', open('/path/to/doc.pdf', 'rb'), 'application/pdf')
-}
-data = {
-    'doctype': 'Customer',
-    'docname': 'CUST-00001',
-    'is_private': 1
-}
+files = {'file': ('document.pdf', open('doc.pdf', 'rb'), 'application/pdf')}
+data = {'doctype': 'Customer', 'docname': 'CUST-001', 'is_private': 1}
 
-response = requests.post(
-    'https://erp.example.com/api/method/upload_file',
-    files=files,
-    data=data,
-    headers={'Authorization': 'token api_key:api_secret'}
-)
+# NOTE: Do NOT set Content-Type header — requests handles multipart boundary
+response = requests.post(f'{BASE_URL}/api/method/upload_file',
+    files=files, data=data,
+    headers={'Authorization': 'token api_key:api_secret'})
 ```
 
-**Response:**
+Response:
 ```json
-{
-    "message": {
-        "name": "file_hash.pdf",
-        "file_url": "/private/files/file_hash.pdf",
-        "is_private": 1
-    }
-}
+{"message": {"name": "file_hash.pdf", "file_url": "/private/files/file_hash.pdf", "is_private": 1}}
 ```
+
+---
+
+## v2 API Endpoints [v15+]
+
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| List | GET | `/api/v2/document/{doctype}` |
+| Create | POST | `/api/v2/document/{doctype}` |
+| Read | GET | `/api/v2/document/{doctype}/{name}` |
+| Update | PATCH | `/api/v2/document/{doctype}/{name}` |
+| Delete | DELETE | `/api/v2/document/{doctype}/{name}` |
+| Copy | GET | `/api/v2/document/{doctype}/{name}/copy` |
+| Doc Method | POST | `/api/v2/document/{doctype}/{name}/method/{method}` |
+| Metadata | GET | `/api/v2/doctype/{doctype}/meta` |
+| Count | GET | `/api/v2/doctype/{doctype}/count` |
+
+---
+
+## Standard Response Fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Document identifier |
+| `doctype` | Document type |
+| `docstatus` | 0=Draft, 1=Submitted, 2=Cancelled |
+| `owner` | Created by user |
+| `creation` | Creation datetime |
+| `modified` | Last modified datetime |
+| `modified_by` | Last modified by user |
+
+---
+
+## Debug Mode
+
+```
+GET /api/resource/Customer?debug=True&limit=5
+```
+
+Response includes SQL query and execution time in `exc` field.

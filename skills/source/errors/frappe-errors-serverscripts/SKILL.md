@@ -1,10 +1,13 @@
 ---
 name: frappe-errors-serverscripts
 description: >
-  Use when handling errors in ERPNext Server Scripts. Covers sandbox errors,
-  frappe.throw usage, validation in server scripts, and debugging for
-  v14/v15/v16. Keywords: server script error, frappe.throw, sandbox error,
-  validation error, debugging server script.
+  Use when debugging or preventing errors in Frappe Server Scripts.
+  Prevents ImportError (the #1 error), NameError for restricted builtins,
+  sandbox violations, doc_events not firing, wrong script type selection,
+  SQL injection, permission denied in scheduled scripts, infinite loops,
+  and API scripts not returning JSON. Covers error message mapping table.
+  Keywords: server script error, ImportError, NameError, sandbox,
+  restricted, frappe.throw, doc_events, scheduler, API script, SQL injection.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:
@@ -12,409 +15,268 @@ metadata:
   version: "2.0"
 ---
 
-# ERPNext Server Scripts - Error Handling
+# Server Script Errors — Diagnosis and Resolution
 
-This skill covers error handling patterns for Server Scripts. For syntax, see `frappe-syntax-serverscripts`. For implementation workflows, see `frappe-impl-serverscripts`.
-
-**Version**: v14/v15/v16 compatible
+Cross-refs: `frappe-syntax-serverscripts` (syntax), `frappe-impl-serverscripts` (workflows), `frappe-errors-clientscripts` (client-side).
 
 ---
 
-## CRITICAL: Sandbox Limitations for Error Handling
+## CRITICAL: Server Scripts Disabled by Default [v15+]
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ ⚠️  SANDBOX RESTRICTIONS AFFECT ERROR HANDLING                      │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ ❌ NO try/except blocks (blocked in RestrictedPython)               │
-│ ❌ NO raise statements (use frappe.throw instead)                   │
-│ ❌ NO import traceback                                              │
-│                                                                     │
-│ ✅ frappe.throw() - Stop execution, show error                      │
-│ ✅ frappe.log_error() - Log to Error Log doctype                    │
-│ ✅ frappe.msgprint() - Show message, continue execution             │
-│ ✅ Conditional checks before operations                             │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Main Decision: How to Handle the Error?
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ WHAT TYPE OF ERROR ARE YOU HANDLING?                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ ► Validation error (must stop save/submit)?                             │
-│   └─► frappe.throw() with clear message                                 │
-│                                                                         │
-│ ► Warning (inform user, allow continue)?                                │
-│   └─► frappe.msgprint() with indicator                                  │
-│                                                                         │
-│ ► Log error for debugging (no user impact)?                             │
-│   └─► frappe.log_error()                                                │
-│                                                                         │
-│ ► API error response (HTTP error)?                                      │
-│   └─► frappe.throw() with exc parameter OR set response                 │
-│                                                                         │
-│ ► Scheduler task error?                                                 │
-│   └─► frappe.log_error() + continue processing other items              │
-│                                                                         │
-│ ► Prevent operation but not with error dialog?                          │
-│   └─► Return early + frappe.msgprint()                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Error Methods Reference
-
-### Quick Reference
-
-| Method | Stops Execution? | User Sees? | Logged? | Use For |
-|--------|:----------------:|:----------:|:-------:|---------|
-| `frappe.throw()` | ✅ YES | Dialog | Error Log | Validation errors |
-| `frappe.msgprint()` | ❌ NO | Dialog | No | Warnings |
-| `frappe.log_error()` | ❌ NO | No | Error Log | Debug/audit |
-| `frappe.publish_realtime()` | ❌ NO | Toast | No | Background updates |
-
-### frappe.throw() - Stop Execution
+Starting from Frappe v15, Server Scripts are **disabled by default**. You MUST enable them:
 
 ```python
-# Basic throw - stops execution, rolls back transaction
-frappe.throw("Customer is required")
-
-# With title
-frappe.throw("Amount cannot be negative", title="Validation Error")
-
-# With exception type (for API scripts)
-frappe.throw("Not authorized", exc=frappe.PermissionError)
-frappe.throw("Record not found", exc=frappe.DoesNotExistError)
-
-# With formatted message
-frappe.throw(
-    f"Credit limit exceeded. Limit: {credit_limit}, Requested: {amount}",
-    title="Credit Check Failed"
-)
+# In site_config.json
+{ "server_script_enabled": 1 }
 ```
 
-**Exception Types for API Scripts:**
+On Frappe Cloud: Server Scripts are ONLY available on **private benches**, NOT on shared benches.
 
-| Exception | HTTP Code | Use For |
-|-----------|:---------:|---------|
-| `frappe.ValidationError` | 417 | Validation failures |
+---
+
+## Error Diagnosis Flowchart
+
+```
+ERROR IN SERVER SCRIPT
+│
+├─► ImportError / NameError
+│   ├─► "import json" → BLOCKED. Use frappe.parse_json()
+│   ├─► "import datetime" → BLOCKED. Use frappe.utils
+│   ├─► "import os/sys/subprocess" → BLOCKED. Security restriction
+│   └─► "NameError: name 'dict' is not defined" → Some builtins restricted
+│
+├─► SyntaxError: not allowed
+│   ├─► "try/except" → BLOCKED by RestrictedPython [v14-v15]
+│   ├─► "raise ValueError" → BLOCKED. Use frappe.throw()
+│   └─► "exec/eval" → BLOCKED. Security restriction
+│
+├─► Script runs but nothing happens
+│   ├─► Wrong Script Type selected → Check Document Event vs API vs Scheduler
+│   ├─► Wrong DocType selected → Verify exact DocType name
+│   ├─► Wrong Event selected → Before Save ≠ After Save
+│   └─► Script disabled → Check "Enabled" checkbox
+│
+├─► 403 Permission Denied
+│   ├─► Scheduler script → Runs as Administrator, check role permissions
+│   ├─► API script → Check Allow Guest setting
+│   └─► doc_event → User lacks DocType permission
+│
+├─► Data not saved in Scheduler
+│   └─► Missing frappe.db.commit() → REQUIRED in scheduler scripts
+│
+└─► API script returns empty/wrong response
+    └─► Not setting frappe.response["message"] → ALWAYS set response
+```
+
+---
+
+## Error Message → Cause → Fix Table
+
+| Error Message | Cause | Fix |
+|---------------|-------|-----|
+| `ImportError: import not allowed` | Any `import` statement in sandbox | Use `frappe.utils`, `frappe.parse_json()`, etc. |
+| `NameError: name 'dict' is not defined` | Some Python builtins blocked by RestrictedPython | Use `frappe._dict()` or literal `{}` |
+| `SyntaxError: try/except not allowed` | RestrictedPython blocks exception handling [v14-v15] | Use conditional checks (`if/else`) instead |
+| `SyntaxError: raise not allowed` | RestrictedPython blocks `raise` | Use `frappe.throw()` |
+| `Script not executing` | Wrong Script Type or Event selected | Verify type matches: Document Event, API, or Scheduler |
+| `doc is not defined` | Using `doc` in API or Scheduler script (no document context) | `doc` is only available in Document Event scripts |
+| `PermissionError` in Scheduler | Scheduler runs as Administrator but script accesses restricted resource | Use `ignore_permissions=True` where appropriate |
+| `Changes not saved` in Scheduler | Missing `frappe.db.commit()` | ALWAYS call `frappe.db.commit()` in Scheduler scripts |
+| `API returns empty response` | Forgot to set `frappe.response["message"]` | ALWAYS set `frappe.response["message"] = result` |
+| `Timeout / killed` | Infinite loop or processing too many records | ALWAYS add `limit` to queries, ALWAYS use batch processing |
+| `ValidationError: qty is required` | `doc.save()` called in Before Save (recursion) | NEVER call `doc.save()` in Before Save; just set values |
+| `SQL injection via string format` | User input in SQL without escaping | ALWAYS use `frappe.db.escape()` or parameterized queries |
+
+---
+
+## The #1 Error: ImportError
+
+**Every beginner hits this.** The Server Script sandbox blocks ALL imports except `json`.
+
+```python
+# ❌ BLOCKED — These ALL fail with ImportError
+import json                    # Use frappe.parse_json() / frappe.as_json()
+from datetime import datetime  # Use frappe.utils.now(), frappe.utils.today()
+import re                      # Not available in sandbox
+import os                      # Security: blocked
+import requests                # Use frappe.make_get_request(), frappe.make_post_request()
+
+# ✅ CORRECT — Sandbox equivalents
+data = frappe.parse_json(doc.json_field)         # Instead of json.loads()
+today = frappe.utils.today()                      # Instead of datetime.date.today()
+now = frappe.utils.now()                          # Instead of datetime.now()
+diff = frappe.utils.date_diff(date1, date2)       # Instead of timedelta
+resp = frappe.make_get_request("https://api.com") # Instead of requests.get()
+resp = frappe.make_post_request("https://api.com", data=payload)
+```
+
+### Available Sandbox API (Complete Reference)
+
+| Category | Available Methods |
+|----------|-------------------|
+| **Document** | `frappe.get_doc()`, `frappe.new_doc()`, `frappe.get_last_doc()`, `frappe.get_cached_doc()`, `frappe.get_mapped_doc()`, `frappe.rename_doc()`, `frappe.delete_doc()` |
+| **Database** | `frappe.db.get_list()`, `frappe.db.get_all()`, `frappe.db.get_value()`, `frappe.db.get_single_value()`, `frappe.db.set_value()`, `frappe.db.exists()`, `frappe.db.sql()`, `frappe.db.commit()`, `frappe.db.rollback()`, `frappe.db.escape()` |
+| **Query Builder** | `frappe.qb` (full query builder) |
+| **HTTP** | `frappe.make_get_request()`, `frappe.make_post_request()`, `frappe.make_put_request()` |
+| **Utility** | `frappe.utils.*` (all utility functions), `frappe.parse_json()`, `frappe.as_json()` |
+| **User/Session** | `frappe.session.user`, `frappe.get_roles()`, `frappe.has_permission()` |
+| **Messages** | `frappe.throw()`, `frappe.msgprint()`, `frappe.log_error()`, `frappe.sendmail()` |
+| **Module** | `json` (the ONLY importable module) |
+
+---
+
+## Script Type Selection Errors
+
+ALWAYS verify you selected the correct Script Type:
+
+| Script Type | Trigger | Has `doc`? | Has `frappe.form_dict`? | Auto-commit? |
+|-------------|---------|:----------:|:-----------------------:|:------------:|
+| Document Event | DocType lifecycle (Before Save, After Save, etc.) | YES | NO | YES |
+| API | HTTP request to `/api/method/{method_name}` | NO | YES | YES |
+| Scheduler Event | Cron schedule | NO | NO | NO — MUST call `frappe.db.commit()` |
+| Permission Query | Every list query on the DocType | NO | NO (has `user`) | N/A |
+
+### Common Mistake: Wrong Event
+
+```python
+# ❌ WRONG — "After Save" cannot prevent save
+# Script Type: Document Event, Event: After Save
+if not doc.customer:
+    frappe.throw("Customer is required")  # Document already saved!
+
+# ✅ CORRECT — Use "Before Save" or "Before Validate"
+# Script Type: Document Event, Event: Before Save
+if not doc.customer:
+    frappe.throw("Customer is required")  # Prevents save
+```
+
+---
+
+## Sandbox Workarounds
+
+### try/except Is Blocked — Use Conditional Checks
+
+```python
+# ❌ BLOCKED in sandbox
+try:
+    customer = frappe.get_doc("Customer", doc.customer)
+except Exception:
+    frappe.throw("Customer not found")
+
+# ✅ CORRECT — Check first, then access
+if not frappe.db.exists("Customer", doc.customer):
+    frappe.throw(f"Customer '{doc.customer}' not found")
+customer = frappe.get_doc("Customer", doc.customer)
+```
+
+### raise Is Blocked — Use frappe.throw()
+
+```python
+# ❌ BLOCKED
+if amount < 0:
+    raise ValueError("Amount cannot be negative")
+
+# ✅ CORRECT
+if amount < 0:
+    frappe.throw("Amount cannot be negative")
+```
+
+### frappe.throw() Exception Types for API Scripts
+
+| Exception | HTTP Code | Use When |
+|-----------|:---------:|----------|
+| `frappe.ValidationError` | 417 | Input validation failure |
 | `frappe.PermissionError` | 403 | Access denied |
 | `frappe.DoesNotExistError` | 404 | Record not found |
 | `frappe.AuthenticationError` | 401 | Not logged in |
-| `frappe.OutgoingEmailError` | 500 | Email send failed |
-
-### frappe.log_error() - Silent Logging
+| (default, no exc) | 417 | General validation error |
 
 ```python
-# Basic error log
-frappe.log_error("Something went wrong", "My Script Error")
-
-# With context data
-frappe.log_error(
-    f"Failed to process invoice {doc.name}: {error_detail}",
-    "Invoice Processing Error"
-)
-
-# Log current exception (in controllers, not sandbox)
-frappe.log_error(frappe.get_traceback(), "Unexpected Error")
-```
-
-### frappe.msgprint() - Warning Without Stopping
-
-```python
-# Simple warning
-frappe.msgprint("Stock is running low", indicator="orange")
-
-# With title
-frappe.msgprint(
-    "This customer has pending payments",
-    title="Warning",
-    indicator="yellow"
-)
-
-# Alert style (top of page)
-frappe.msgprint(
-    "Document will be processed in background",
-    alert=True
-)
+# API Script — Correct exception types
+if not customer:
+    frappe.throw("Customer param required", exc=frappe.ValidationError)  # 417
+if not frappe.db.exists("Customer", customer):
+    frappe.throw("Customer not found", exc=frappe.DoesNotExistError)    # 404
+if not frappe.has_permission("Customer", "read", customer):
+    frappe.throw("Access denied", exc=frappe.PermissionError)           # 403
 ```
 
 ---
 
-## Error Handling Patterns by Script Type
-
-### Pattern 1: Document Event - Validation
+## Scheduler Script — Critical Mistakes
 
 ```python
-# Type: Document Event
-# Event: Before Save
+# ❌ WRONG — No limit, no commit, no error logging
+invoices = frappe.get_all("Sales Invoice", filters={"status": "Unpaid"})
+for inv in invoices:
+    frappe.db.set_value("Sales Invoice", inv.name, "reminder_sent", 1)
 
-# Collect all errors, show together
-errors = []
-
-if not doc.customer:
-    errors.append("Customer is required")
-
-if doc.grand_total <= 0:
-    errors.append("Total must be greater than zero")
-
-if not doc.items:
-    errors.append("At least one item is required")
-else:
-    for idx, item in enumerate(doc.items, 1):
-        if not item.item_code:
-            errors.append(f"Row {idx}: Item Code is required")
-        if (item.qty or 0) <= 0:
-            errors.append(f"Row {idx}: Quantity must be positive")
-
-# Throw all errors at once
-if errors:
-    frappe.throw("<br>".join(errors), title="Validation Errors")
-```
-
-### Pattern 2: Document Event - Conditional Warning
-
-```python
-# Type: Document Event
-# Event: Before Save
-
-# Warning: doesn't stop save
-credit_limit = frappe.db.get_value("Customer", doc.customer, "credit_limit") or 0
-
-if credit_limit > 0 and doc.grand_total > credit_limit:
-    frappe.msgprint(
-        f"Order total ({doc.grand_total}) exceeds credit limit ({credit_limit})",
-        title="Credit Warning",
-        indicator="orange"
-    )
-```
-
-### Pattern 3: Document Event - Safe Database Lookup
-
-```python
-# Type: Document Event
-# Event: Before Save
-
-# Always validate before database lookup
-if doc.customer:
-    customer_data = frappe.db.get_value(
-        "Customer", 
-        doc.customer, 
-        ["credit_limit", "disabled", "territory"],
-        as_dict=True
-    )
-    
-    # Check if customer exists
-    if not customer_data:
-        frappe.throw(f"Customer {doc.customer} not found")
-    
-    # Check if disabled
-    if customer_data.disabled:
-        frappe.throw(f"Customer {doc.customer} is disabled")
-    
-    # Use the data
-    doc.territory = customer_data.territory
-```
-
-### Pattern 4: API Script - Error Responses
-
-```python
-# Type: API
-# Method: get_customer_info
-
-customer = frappe.form_dict.get("customer")
-
-# Validate required parameter
-if not customer:
-    frappe.throw("Parameter 'customer' is required", exc=frappe.ValidationError)
-
-# Check existence
-if not frappe.db.exists("Customer", customer):
-    frappe.throw(f"Customer '{customer}' not found", exc=frappe.DoesNotExistError)
-
-# Check permission
-if not frappe.has_permission("Customer", "read", customer):
-    frappe.throw("You don't have permission to view this customer", exc=frappe.PermissionError)
-
-# Success response
-frappe.response["message"] = {
-    "customer": customer,
-    "credit_limit": frappe.db.get_value("Customer", customer, "credit_limit")
-}
-```
-
-### Pattern 5: Scheduler - Batch Processing with Error Isolation
-
-```python
-# Type: Scheduler Event
-# Cron: 0 9 * * * (daily at 9:00)
-
-processed = 0
-errors = []
-
+# ✅ CORRECT — Limit, batch commit, error logging
+BATCH_SIZE = 50
 invoices = frappe.get_all(
     "Sales Invoice",
     filters={"status": "Unpaid", "docstatus": 1},
     fields=["name", "customer"],
-    limit=100  # ALWAYS limit in scheduler
+    limit=500  # ALWAYS limit
 )
 
-for inv in invoices:
-    # Isolate errors per item - don't let one failure stop all
-    if not frappe.db.exists("Customer", inv.customer):
-        errors.append(f"{inv.name}: Customer not found")
-        continue
-    
-    # Safe processing
-    result = process_invoice(inv.name)
-    if result.get("success"):
-        processed += 1
-    else:
-        errors.append(f"{inv.name}: {result.get('error', 'Unknown error')}")
+errors = []
+for i in range(0, len(invoices), BATCH_SIZE):
+    batch = invoices[i:i + BATCH_SIZE]
+    for inv in batch:
+        if not frappe.db.exists("Customer", inv.customer):
+            errors.append(f"{inv.name}: Customer not found")
+            continue
+        frappe.db.set_value("Sales Invoice", inv.name, "reminder_sent", 1)
+    frappe.db.commit()  # REQUIRED
 
-# Log summary
 if errors:
-    frappe.log_error(
-        f"Processed: {processed}, Errors: {len(errors)}\n\n" + "\n".join(errors),
-        "Invoice Processing Summary"
-    )
-
-# REQUIRED: commit in scheduler
-frappe.db.commit()
-
-
-def process_invoice(invoice_name):
-    """Helper function with error handling"""
-    # Validate invoice exists
-    if not frappe.db.exists("Sales Invoice", invoice_name):
-        return {"success": False, "error": "Invoice not found"}
-    
-    # Process logic here
-    return {"success": True}
-```
-
-### Pattern 6: Permission Query - Safe Fallback
-
-```python
-# Type: Permission Query
-# DocType: Sales Invoice
-
-# Safe role check
-user_roles = frappe.get_roles(user) or []
-
-if "System Manager" in user_roles:
-    conditions = ""  # Full access
-elif "Sales Manager" in user_roles:
-    # Manager sees team's invoices
-    team = frappe.db.get_value("User", user, "department")
-    if team:
-        conditions = f"`tabSales Invoice`.department = {frappe.db.escape(team)}"
-    else:
-        conditions = f"`tabSales Invoice`.owner = {frappe.db.escape(user)}"
-elif "Sales User" in user_roles:
-    # User sees only own invoices
-    conditions = f"`tabSales Invoice`.owner = {frappe.db.escape(user)}"
-else:
-    # No access - return impossible condition
-    conditions = "1=0"
-```
-
-> **See**: `references/patterns.md` for more error handling patterns.
-
----
-
-## Transaction Behavior
-
-### Automatic Rollback on frappe.throw()
-
-```python
-# Type: Document Event - Before Save
-
-# All changes roll back if throw is called
-doc.status = "Processing"  # This change...
-frappe.db.set_value("Counter", "main", "count", 100)  # ...and this...
-
-if some_condition_fails:
-    frappe.throw("Validation failed")  # ...are ALL rolled back
-```
-
-### Manual Commit in Scheduler
-
-```python
-# Type: Scheduler Event
-
-# Changes are NOT auto-committed in scheduler
-for item in items:
-    frappe.db.set_value("Item", item.name, "last_sync", frappe.utils.now())
-
-# REQUIRED: Explicit commit
+    frappe.log_error("\n".join(errors), "Reminder Errors")
 frappe.db.commit()
 ```
 
-### Partial Commit Pattern (Scheduler)
+---
+
+## SQL Injection Prevention
 
 ```python
-# Type: Scheduler Event
-# Process in batches with intermediate commits
+# ❌ VULNERABLE — String interpolation with user input
+territory = frappe.form_dict.get("territory")
+conditions = f"`tabCustomer`.territory = '{territory}'"  # SQL INJECTION!
 
-BATCH_SIZE = 50
-items = frappe.get_all("Item", filters={"sync_pending": 1}, limit=500)
+# ✅ SAFE — Use frappe.db.escape()
+territory = frappe.form_dict.get("territory")
+conditions = f"`tabCustomer`.territory = {frappe.db.escape(territory)}"
 
-for i in range(0, len(items), BATCH_SIZE):
-    batch = items[i:i + BATCH_SIZE]
-    
-    for item in batch:
-        frappe.db.set_value("Item", item.name, "sync_pending", 0)
-    
-    # Commit after each batch - partial progress saved
-    frappe.db.commit()
+# ✅ SAFEST — Use parameterized query or Query Builder
+results = frappe.db.get_all("Customer", filters={"territory": territory})
 ```
 
 ---
 
-## Critical Rules
+## ALWAYS / NEVER Rules
 
-### ✅ ALWAYS
+### ALWAYS
 
-1. **Validate inputs before database operations** - Check existence before get_doc
-2. **Use `frappe.db.escape()` for user input in SQL** - Prevent SQL injection
-3. **Add `limit` to queries in Scheduler scripts** - Prevent memory issues
-4. **Call `frappe.db.commit()` in Scheduler scripts** - Changes aren't auto-saved
-5. **Collect multiple errors before throwing** - Better user experience
-6. **Log errors in Scheduler scripts** - No user to see the error
+1. **Use `frappe.utils.*` instead of Python imports** — Only `json` module is importable
+2. **Use `frappe.throw()` instead of `raise`** — `raise` is blocked by sandbox
+3. **Use conditional checks instead of `try/except`** — Exception handling is blocked [v14-v15]
+4. **Call `frappe.db.commit()` in Scheduler scripts** — Changes are NOT auto-committed
+5. **Add `limit` to ALL queries in Scheduler scripts** — Prevent memory exhaustion
+6. **Set `frappe.response["message"]` in API scripts** — Otherwise response is empty
+7. **Use `frappe.db.escape()` for user input in SQL** — Prevent SQL injection
+8. **Log errors in Scheduler scripts** with `frappe.log_error()` — No user to see errors
+9. **Verify Script Type matches your intent** — Document Event vs API vs Scheduler
 
-### ❌ NEVER
+### NEVER
 
-1. **Don't use try/except in Server Scripts** - Blocked by sandbox
-2. **Don't use `raise` statement** - Use `frappe.throw()` instead
-3. **Don't call `doc.save()` in Before Save event** - Framework handles it
-4. **Don't assume database values exist** - Always check first
-5. **Don't ignore empty results** - Handle gracefully
-
----
-
-## Quick Reference: Error Message Quality
-
-```python
-# ❌ BAD - Technical, not actionable
-frappe.throw("KeyError: customer")
-frappe.throw("NoneType has no attribute 'name'")
-frappe.throw("Query failed")
-
-# ✅ GOOD - Clear, actionable
-frappe.throw("Please select a customer before saving")
-frappe.throw(f"Customer '{doc.customer}' not found. Please verify the customer exists.")
-frappe.throw("Could not calculate totals. Please ensure all items have valid quantities.")
-```
+1. **NEVER use `import` statements** (except `json`) — Blocked by RestrictedPython
+2. **NEVER use `try/except` or `raise`** — Blocked by sandbox [v14-v15]
+3. **NEVER call `doc.save()` in Before Save** — Causes infinite recursion
+4. **NEVER use string formatting for SQL with user input** — SQL injection risk
+5. **NEVER process unlimited records in Scheduler** — Always use `limit`
+6. **NEVER assume `doc` exists in API/Scheduler scripts** — Only available in Document Events
+7. **NEVER forget `frappe.db.commit()` in Scheduler** — All changes will be lost
 
 ---
 
@@ -422,15 +284,6 @@ frappe.throw("Could not calculate totals. Please ensure all items have valid qua
 
 | File | Contents |
 |------|----------|
-| `references/patterns.md` | Complete error handling patterns |
-| `references/examples.md` | Full working examples |
-| `references/anti-patterns.md` | Common mistakes to avoid |
-
----
-
-## See Also
-
-- `frappe-syntax-serverscripts` - Server Script syntax
-- `frappe-impl-serverscripts` - Implementation workflows
-- `frappe-errors-clientscripts` - Client-side error handling
-- `frappe-core-database` - Database operations
+| `references/examples.md` | Real error scenarios with diagnosis |
+| `references/anti-patterns.md` | Common sandbox mistakes with fixes |
+| `references/patterns.md` | Defensive error handling patterns by script type |

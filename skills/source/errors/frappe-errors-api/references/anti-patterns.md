@@ -1,371 +1,266 @@
-# Anti-Patterns - API Error Handling
+# Anti-Patterns — API Error Handling
 
-Common mistakes to avoid when handling API errors in Frappe/ERPNext.
+Common mistakes to avoid. Each entry follows: WRONG -> CORRECT -> WHY.
 
 ---
 
 ## 1. No Input Validation
 
-### ❌ WRONG
-
 ```python
+# WRONG — Uses inputs directly, crashes on bad data
 @frappe.whitelist()
 def process_order(customer, amount):
-    # Directly use inputs without validation!
-    order = frappe.get_doc({
-        "doctype": "Sales Order",
-        "customer": customer,
-        "items": [{"item_code": "ITEM", "qty": 1, "rate": amount}]
-    })
+    order = frappe.get_doc({"doctype": "Sales Order", "customer": customer,
+        "items": [{"item_code": "ITEM", "qty": 1, "rate": amount}]})
     order.insert()
-```
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Validate everything first
 @frappe.whitelist()
 def process_order(customer, amount):
-    # Validate all inputs first
     if not customer:
-        frappe.throw(_("Customer is required"), exc=frappe.ValidationError)
-    
+        frappe.throw(_("Customer required"), exc=frappe.ValidationError)
     if not frappe.db.exists("Customer", customer):
         frappe.throw(_("Customer not found"), exc=frappe.DoesNotExistError)
-    
     try:
         amount = float(amount)
         if amount <= 0:
             frappe.throw(_("Amount must be positive"), exc=frappe.ValidationError)
     except (ValueError, TypeError):
         frappe.throw(_("Invalid amount"), exc=frappe.ValidationError)
-    
     # Now safe to proceed
-    order = frappe.get_doc({...})
-    order.insert()
 ```
 
-**Why**: Unvalidated inputs cause cryptic errors and potential security issues.
+**Why:** Unvalidated inputs cause cryptic errors and potential security issues.
 
 ---
 
 ## 2. Missing Error Callback in frappe.call
 
-### ❌ WRONG
-
 ```javascript
+// WRONG — No feedback on failure
 frappe.call({
     method: "myapp.api.process",
-    args: { data: data },
-    callback: function(r) {
-        frappe.show_alert("Done!");
-    }
+    args: {data: data},
+    callback: function(r) { frappe.show_alert("Done!"); }
     // No error handler!
 });
-```
 
-### ✅ CORRECT
-
-```javascript
+// CORRECT — ALWAYS handle errors
 frappe.call({
     method: "myapp.api.process",
-    args: { data: data },
+    args: {data: data},
     callback: function(r) {
-        if (r.message) {
-            frappe.show_alert({message: "Done!", indicator: "green"});
-        }
+        if (r.message) frappe.show_alert({message: "Done!", indicator: "green"});
     },
     error: function(r) {
-        frappe.msgprint({
-            title: __("Error"),
-            message: get_error_message(r),
-            indicator: "red"
-        });
+        frappe.msgprint({title: __("Error"),
+            message: r._server_messages || __("Operation failed"), indicator: "red"});
     }
 });
 ```
 
-**Why**: Without error callback, users see no feedback when API fails.
+**Why:** Without error callback, users see no feedback when API calls fail.
 
 ---
 
 ## 3. Exposing Internal Errors to Users
 
-### ❌ WRONG
-
 ```python
+# WRONG — Leaks stack traces and internal details
 @frappe.whitelist()
-def calculate_price(item_code):
+def calculate(item_code):
     try:
         return get_price(item_code)
     except Exception as e:
-        # Exposes internal error details!
-        frappe.throw(str(e))
-```
+        frappe.throw(str(e))  # Exposes internals!
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Log internally, show friendly message
 @frappe.whitelist()
-def calculate_price(item_code):
+def calculate(item_code):
     try:
         return get_price(item_code)
-    except Exception as e:
-        # Log for debugging
+    except Exception:
         frappe.log_error(frappe.get_traceback(), "Price Calculation Error")
-        # User-friendly message
         frappe.throw(_("Unable to calculate price. Please try again."))
 ```
 
-**Why**: Internal errors may expose sensitive information and confuse users.
+**Why:** Internal errors may expose database structure, file paths, or credentials.
 
 ---
 
-## 4. No Permission Check in API
-
-### ❌ WRONG
+## 4. No Permission Check in Whitelisted Method
 
 ```python
+# WRONG — Any logged-in user can delete any record
 @frappe.whitelist()
 def delete_record(doctype, name):
-    # Anyone can call this and delete any record!
     frappe.delete_doc(doctype, name)
-```
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Check permission first
 @frappe.whitelist()
 def delete_record(doctype, name):
-    # Validate inputs
     if not doctype or not name:
         frappe.throw(_("DocType and name required"), exc=frappe.ValidationError)
-    
-    # Check permission
-    if not frappe.has_permission(doctype, "delete", name):
-        frappe.throw(
-            _("You don't have permission to delete this record"),
-            exc=frappe.PermissionError
-        )
-    
+    frappe.has_permission(doctype, "delete", name, throw=True)
     frappe.delete_doc(doctype, name)
 ```
 
-**Why**: Whitelisted methods are callable by any logged-in user.
+**Why:** `@frappe.whitelist()` makes the function callable by ANY logged-in user. Permission checks are mandatory.
 
 ---
 
-## 5. Retrying 4xx Errors
-
-### ❌ WRONG
+## 5. Retrying 4xx Client Errors
 
 ```python
+# WRONG — Retries all errors including 400, 401, 403
 def call_api(url, data):
     for attempt in range(3):
         response = requests.post(url, json=data)
         if response.status_code != 200:
             time.sleep(2 ** attempt)
-            continue  # Retries ALL errors including 400, 401, 403
+            continue
         return response.json()
-```
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Only retry 5xx and 429, NEVER retry other 4xx
 def call_api(url, data):
     for attempt in range(3):
-        response = requests.post(url, json=data)
-        
+        response = requests.post(url, json=data, timeout=30)
         if response.status_code == 200:
             return response.json()
-        
-        # Don't retry client errors (except rate limit)
+        if response.status_code == 429:
+            time.sleep(int(response.headers.get("Retry-After", 60)))
+            continue
         if 400 <= response.status_code < 500:
-            if response.status_code == 429:  # Rate limit
-                time.sleep(int(response.headers.get("Retry-After", 60)))
-                continue
-            frappe.throw(f"API error: {response.status_code}")
-        
-        # Retry server errors
+            frappe.throw(f"Client error: {response.status_code}")
         if response.status_code >= 500:
             time.sleep(2 ** attempt)
             continue
 ```
 
-**Why**: 4xx errors indicate client problems - retrying won't help.
+**Why:** 4xx errors indicate client bugs — retrying them wastes resources and never succeeds.
 
 ---
 
 ## 6. Swallowing Errors Silently
 
-### ❌ WRONG
-
 ```python
+# WRONG — Silent failure, impossible to debug
 @frappe.whitelist()
 def sync_data():
     try:
         perform_sync()
     except Exception:
-        pass  # Silent failure - no logging, no user feedback!
-```
+        pass  # No logging!
 
-### ✅ CORRECT
-
-```python
+# CORRECT — ALWAYS log before handling
 @frappe.whitelist()
 def sync_data():
     try:
         perform_sync()
         return {"status": "success"}
-    except Exception as e:
+    except Exception:
         frappe.log_error(frappe.get_traceback(), "Sync Error")
-        frappe.throw(_("Sync failed: {0}").format(str(e)))
+        frappe.throw(_("Sync failed. Please try again."))
 ```
 
-**Why**: Silent failures make debugging impossible.
+**Why:** Silent failures make production debugging impossible. ALWAYS log with `frappe.log_error()`.
 
 ---
 
 ## 7. Hardcoded API Credentials
 
-### ❌ WRONG
-
 ```python
+# WRONG — Credentials in source code
 def get_data():
-    headers = {
-        "Authorization": "Bearer sk_live_abc123xyz"  # Hardcoded!
-    }
+    headers = {"Authorization": "Bearer sk_live_abc123"}
     return requests.get(url, headers=headers)
-```
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Store in encrypted DocType field
 def get_data():
     settings = frappe.get_single("API Settings")
-    headers = {
-        "Authorization": f"Bearer {settings.get_password('api_key')}"
-    }
-    return requests.get(url, headers=headers)
+    headers = {"Authorization": f"Bearer {settings.get_password('api_key')}"}
+    return requests.get(url, headers=headers, timeout=30)
 ```
 
-**Why**: Hardcoded credentials are a security risk and can't be rotated.
+**Why:** Hardcoded credentials end up in version control and cannot be rotated.
 
 ---
 
 ## 8. No Timeout on External Requests
 
-### ❌ WRONG
-
 ```python
-def fetch_external_data():
-    # Can hang forever!
-    response = requests.get("https://api.example.com/data")
-    return response.json()
+# WRONG — Can hang forever
+response = requests.get("https://api.example.com/data")
+
+# CORRECT — ALWAYS set timeout
+response = requests.get("https://api.example.com/data", timeout=30)
 ```
 
-### ✅ CORRECT
-
-```python
-def fetch_external_data():
-    try:
-        response = requests.get(
-            "https://api.example.com/data",
-            timeout=30  # 30 second timeout
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        frappe.throw(_("Request timed out. Please try again."))
-    except requests.exceptions.ConnectionError:
-        frappe.throw(_("Unable to connect to service."))
-```
-
-**Why**: Requests without timeout can hang indefinitely.
+**Why:** Requests without timeout can hang indefinitely, blocking the worker process.
 
 ---
 
 ## 9. Wrong HTTP Status for Error Type
 
-### ❌ WRONG
-
 ```python
+# WRONG — Returns 200 with error in body
 @frappe.whitelist()
 def get_item(name):
     if not frappe.db.exists("Item", name):
-        # Returns 200 with error message!
-        return {"error": "Not found"}
-```
+        return {"error": "Not found"}  # Client gets 200!
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Use proper exception for 404
 @frappe.whitelist()
 def get_item(name):
     if not frappe.db.exists("Item", name):
-        frappe.throw(
-            _("Item not found"),
-            exc=frappe.DoesNotExistError  # Returns 404
-        )
-    
+        frappe.throw(_("Item not found"), exc=frappe.DoesNotExistError)
     return frappe.get_doc("Item", name)
 ```
 
-**Why**: Proper HTTP status codes help clients handle errors correctly.
+**Why:** Proper HTTP status codes let clients handle different error types correctly.
 
 ---
 
 ## 10. Not Parsing JSON Input
 
-### ❌ WRONG
-
 ```python
+# WRONG — Crashes if items arrives as JSON string
 @frappe.whitelist()
 def update_items(items):
-    # Assumes items is already a list - crashes if string!
-    for item in items:
+    for item in items:  # TypeError if items is a string
         update_item(item)
-```
 
-### ✅ CORRECT
-
-```python
+# CORRECT — Handle both string and parsed input
 @frappe.whitelist()
 def update_items(items):
-    # Handle both string and list input
     if isinstance(items, str):
         try:
             items = frappe.parse_json(items)
         except Exception:
-            frappe.throw(_("Invalid JSON format"), exc=frappe.ValidationError)
-    
+            frappe.throw(_("Invalid JSON"), exc=frappe.ValidationError)
     if not isinstance(items, list):
         frappe.throw(_("Items must be a list"), exc=frappe.ValidationError)
-    
     for item in items:
         update_item(item)
 ```
 
-**Why**: API inputs may be JSON strings depending on how they're sent.
+**Why:** frappe.call sends complex args as JSON strings. ALWAYS handle both formats.
 
 ---
 
-## 11. Blocking UI Without Feedback
-
-### ❌ WRONG
+## 11. No Loading Indicator for Long Operations
 
 ```javascript
-async function processLargeData() {
-    // No loading indicator - UI appears frozen!
+// WRONG — UI appears frozen
+async function processLarge() {
     const result = await frappe.xcall("myapp.api.process_large");
     console.log(result);
 }
-```
 
-### ✅ CORRECT
-
-```javascript
-async function processLargeData() {
+// CORRECT — Show feedback during processing
+async function processLarge() {
     try {
-        frappe.freeze(__("Processing large dataset..."));
+        frappe.freeze(__("Processing..."));
         const result = await frappe.xcall("myapp.api.process_large");
         frappe.show_alert({message: __("Complete!"), indicator: "green"});
         return result;
@@ -377,184 +272,103 @@ async function processLargeData() {
 }
 ```
 
-**Why**: Users need feedback during long operations.
+**Why:** Users need visual feedback during operations longer than 1 second.
 
 ---
 
 ## 12. No Rate Limit Handling
 
-### ❌ WRONG
-
 ```python
-def sync_all_records():
-    records = get_records()
-    for record in records:
-        # Rapid-fire requests - will hit rate limits!
+# WRONG — Rapid-fire requests hit rate limits
+for record in records:
+    call_external_api(record)  # Will get 429 eventually
+
+# CORRECT — Throttle and handle 429
+for i, record in enumerate(records):
+    try:
         call_external_api(record)
+    except RateLimitError as e:
+        time.sleep(e.retry_after or 60)
+        call_external_api(record)
+    if i % 10 == 0:
+        time.sleep(1)  # Throttle proactively
 ```
 
-### ✅ CORRECT
-
-```python
-def sync_all_records():
-    records = get_records()
-    for i, record in enumerate(records):
-        try:
-            call_external_api(record)
-        except RateLimitError as e:
-            # Wait and retry
-            wait_time = e.retry_after or 60
-            time.sleep(wait_time)
-            call_external_api(record)
-        
-        # Throttle requests
-        if i % 10 == 0:
-            time.sleep(1)
-```
-
-**Why**: APIs have rate limits that must be respected.
+**Why:** All APIs have rate limits. Exceeding them causes cascading failures.
 
 ---
 
 ## 13. Inconsistent Error Response Format
 
-### ❌ WRONG
-
 ```python
-# Different endpoints return errors differently
-@frappe.whitelist()
-def endpoint1():
-    if error:
-        return {"error": True, "msg": "Failed"}
+# WRONG — Every endpoint returns errors differently
+def ep1(): return {"error": True, "msg": "Failed"}
+def ep2(): return {"success": False, "message": "Error"}
+def ep3(): frappe.throw("Something wrong")
 
-@frappe.whitelist()
-def endpoint2():
-    if error:
-        return {"success": False, "message": "Error occurred"}
-
-@frappe.whitelist()  
-def endpoint3():
-    if error:
-        frappe.throw("Something went wrong")
+# CORRECT — Consistent: use frappe.throw with exception class
+def ep1(): frappe.throw(_("Failed"), exc=frappe.ValidationError)
+def ep2(): frappe.throw(_("Error"), exc=frappe.ValidationError)
+def ep3(): frappe.throw(_("Something wrong"), exc=frappe.ValidationError)
 ```
 
-### ✅ CORRECT
-
-```python
-# Consistent error handling across all endpoints
-@frappe.whitelist()
-def endpoint1():
-    if error:
-        frappe.throw(_("Failed"), exc=frappe.ValidationError)
-
-@frappe.whitelist()
-def endpoint2():
-    if error:
-        frappe.throw(_("Error occurred"), exc=frappe.ValidationError)
-
-@frappe.whitelist()
-def endpoint3():
-    if error:
-        frappe.throw(_("Something went wrong"), exc=frappe.ValidationError)
-```
-
-**Why**: Consistent format makes client-side handling easier.
+**Why:** Consistent error format simplifies client-side error handling across all endpoints.
 
 ---
 
-## 14. Ignoring Network Errors on Client
+## 14. Mixing Authentication Token Formats
 
-### ❌ WRONG
+```python
+# WRONG — Bearer with API key:secret
+headers = {"Authorization": f"Bearer {api_key}:{api_secret}"}
 
-```javascript
-frappe.call({
-    method: "myapp.api.save",
-    callback: function(r) {
-        frappe.show_alert("Saved!");
-    },
-    error: function(r) {
-        // Only handles server errors, not network failures
-        frappe.msgprint(r._server_messages);
-    }
-});
+# CORRECT — "token" keyword for API key:secret
+headers = {"Authorization": f"token {api_key}:{api_secret}"}
+
+# CORRECT — "Bearer" for OAuth tokens only
+headers = {"Authorization": f"Bearer {oauth_access_token}"}
 ```
 
-### ✅ CORRECT
-
-```javascript
-frappe.call({
-    method: "myapp.api.save",
-    callback: function(r) {
-        frappe.show_alert({message: "Saved!", indicator: "green"});
-    },
-    error: function(r) {
-        if (!r.status) {
-            // Network error
-            frappe.msgprint({
-                title: __("Network Error"),
-                message: __("Unable to connect. Check your internet connection."),
-                indicator: "orange"
-            });
-        } else {
-            // Server error
-            frappe.msgprint({
-                title: __("Error"),
-                message: get_server_message(r),
-                indicator: "red"
-            });
-        }
-    }
-});
-```
-
-**Why**: Network errors need different handling than server errors.
+**Why:** Frappe uses `token` prefix for API keys and `Bearer` for OAuth. Mixing them gives 401.
 
 ---
 
-## 15. Not Logging API Errors
-
-### ❌ WRONG
+## 15. Processing Webhooks Synchronously
 
 ```python
-def external_sync():
-    try:
-        return call_external_api()
-    except Exception as e:
-        frappe.throw(str(e))  # No logging - can't debug!
+# WRONG — Slow processing causes sender timeouts and retries
+@frappe.whitelist(allow_guest=True)
+def webhook():
+    data = frappe.parse_json(frappe.request.data)
+    process_heavy_operation(data)  # Takes 30+ seconds
+    return {"status": "ok"}
+
+# CORRECT — Return 200 immediately, process in background
+@frappe.whitelist(allow_guest=True)
+def webhook():
+    data = frappe.parse_json(frappe.request.data)
+    frappe.enqueue("myapp.tasks.process_webhook", queue="short", data=data)
+    return {"status": "accepted"}
 ```
 
-### ✅ CORRECT
-
-```python
-def external_sync():
-    try:
-        return call_external_api()
-    except Exception as e:
-        # Log with full context
-        frappe.log_error(
-            f"External sync failed\n\nError: {str(e)}\n\n{frappe.get_traceback()}",
-            "External API Sync Error"
-        )
-        frappe.throw(_("Sync failed. Please try again."))
-```
-
-**Why**: Logging is essential for debugging production issues.
+**Why:** Webhook senders expect fast responses (< 5s). Slow responses trigger retries.
 
 ---
 
-## Quick Checklist: API Implementation Review
-
-Before deploying API endpoints:
+## Checklist Before Deploying API Endpoints
 
 - [ ] All inputs validated before use
-- [ ] Permission checks in place
-- [ ] Proper exception types used (ValidationError, PermissionError, etc.)
-- [ ] Error callback provided in frappe.call
+- [ ] Permission checks in every whitelisted method
+- [ ] Specific exception types (ValidationError, PermissionError, DoesNotExistError)
+- [ ] Error callback in every frappe.call
 - [ ] Internal errors logged, not exposed to users
 - [ ] No hardcoded credentials
-- [ ] Timeouts set on external requests
-- [ ] Rate limiting handled
-- [ ] JSON inputs parsed safely
-- [ ] Network errors handled separately
+- [ ] Timeouts on all external requests
+- [ ] Rate limiting handled (respect Retry-After)
+- [ ] JSON inputs parsed safely (string or parsed)
+- [ ] Network errors handled separately from server errors
 - [ ] Loading indicators for long operations
 - [ ] Consistent error response format
+- [ ] Token format correct (token vs Bearer)
+- [ ] CSRF token included for session-based auth
+- [ ] Webhooks processed asynchronously

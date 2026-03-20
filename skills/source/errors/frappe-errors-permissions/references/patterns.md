@@ -1,181 +1,152 @@
-# Error Handling Patterns - Permissions
+# Permission Error Handling Patterns
 
-Complete error handling patterns for Frappe/ERPNext permission system.
+Complete error handling patterns for Frappe permission system. For quick reference see SKILL.md.
 
 ---
 
-## Pattern 1: Comprehensive has_permission Hook
+## Pattern 1: has_permission Hook with Full Error Safety
 
 ```python
 # myapp/permissions.py
 import frappe
 
-def sales_order_has_permission(doc, ptype, user):
+def sales_order_has_permission(doc, user, permission_type):
     """
-    Complete has_permission implementation with error handling.
-    
+    Document-level permission hook.
+
     Args:
-        doc: Document object or dict
-        ptype: Permission type (read, write, create, delete, submit, cancel)
-        user: User email or None for current user
-    
+        doc: Document object or dict (may lack methods like .get())
+        user: User email or None (defaults to current user)
+        permission_type: "read", "write", "create", "delete", "submit", "cancel"
+
     Returns:
-        None: Defer to standard permission system
+        None:  Defer to standard permission system (ALWAYS default)
         False: Deny permission
-        
-    NEVER return True - hooks can only restrict, not grant.
+        NEVER return True — hooks can only restrict, not grant.
+
+    NEVER throw from this function. ALWAYS wrap in try/except.
     """
     try:
         user = user or frappe.session.user
-        
-        # Skip for Administrator
+
+        # ALWAYS let Administrator through first
         if user == "Administrator":
             return None
-        
+
         roles = frappe.get_roles(user)
-        
-        # System Manager has full access
+
+        # ALWAYS let System Manager through
         if "System Manager" in roles:
             return None
-        
-        # Get document status safely
+
+        # Safe attribute access — doc may be dict or object
         status = doc.get("status") if hasattr(doc, "get") else getattr(doc, "status", None)
         docstatus = doc.get("docstatus") if hasattr(doc, "get") else getattr(doc, "docstatus", 0)
-        
-        # Rule 1: No editing cancelled documents
-        if ptype == "write" and docstatus == 2:
-            return False
-        
-        # Rule 2: Only managers can delete
-        if ptype == "delete":
-            if "Sales Manager" not in roles:
-                return False
-        
-        # Rule 3: Locked documents are read-only
-        if status == "Locked" and ptype in ["write", "delete", "cancel"]:
-            if "Sales Manager" not in roles:
-                return False
-        
-        # Rule 4: Confidential documents
         is_confidential = doc.get("is_confidential") if hasattr(doc, "get") else getattr(doc, "is_confidential", 0)
+
+        # Rule 1: Cancelled documents are read-only
+        if docstatus == 2 and permission_type != "read":
+            return False
+
+        # Rule 2: Locked documents block modifications
+        if status == "Locked" and permission_type in ("write", "delete", "cancel"):
+            if "Sales Manager" not in roles:
+                return False
+
+        # Rule 3: Only managers can delete
+        if permission_type == "delete" and "Sales Manager" not in roles:
+            return False
+
+        # Rule 4: Confidential access list
         if is_confidential:
-            allowed = get_confidential_access_list(doc)
+            allowed = _get_confidential_users(doc)
             if user not in allowed:
                 return False
-        
-        # Rule 5: Territory-based access
-        if ptype == "read":
-            territory_access = check_territory_access(doc, user)
-            if territory_access is False:
+
+        # Rule 5: Territory restriction
+        if permission_type == "read":
+            if _check_territory_access(doc, user) is False:
                 return False
-        
-        # Defer to standard permission system
+
+        # ALWAYS return None as default — defer to standard system
         return None
-        
+
     except Exception:
         frappe.log_error(
             frappe.get_traceback(),
             f"has_permission error: {getattr(doc, 'name', 'unknown')}"
         )
-        # Safe fallback - defer to standard system
-        return None
+        return None  # SAFE FALLBACK — defer to standard system
 
 
-def get_confidential_access_list(doc):
-    """Get users with confidential access - returns empty list on error."""
+def _get_confidential_users(doc):
+    """Get users with confidential access. Returns empty list on error."""
     try:
         doc_name = doc.get("name") if hasattr(doc, "get") else getattr(doc, "name", None)
         if not doc_name:
             return []
-        
-        # Document owner always has access
         owner = doc.get("owner") if hasattr(doc, "get") else getattr(doc, "owner", None)
         allowed = [owner] if owner else []
-        
-        # Add explicitly allowed users
-        allowed_records = frappe.get_all(
-            "Sales Order Access",
-            filters={"parent": doc_name},
-            pluck="user"
+        allowed.extend(
+            frappe.get_all("Sales Order Access",
+                filters={"parent": doc_name}, pluck="user") or []
         )
-        allowed.extend(allowed_records or [])
-        
         return allowed
-        
     except Exception:
         return []
 
 
-def check_territory_access(doc, user):
-    """Check territory-based access - returns None on error."""
+def _check_territory_access(doc, user):
+    """Check territory access. Returns None to defer, False to deny."""
     try:
-        doc_territory = doc.get("territory") if hasattr(doc, "get") else getattr(doc, "territory", None)
-        if not doc_territory:
-            return None  # No territory restriction
-        
-        user_territories = frappe.get_all(
-            "User Permission",
-            filters={
-                "user": user,
-                "allow": "Territory",
-                "applicable_for": ["in", ["", "Sales Order"]]
-            },
-            pluck="for_value"
-        )
-        
+        territory = doc.get("territory") if hasattr(doc, "get") else getattr(doc, "territory", None)
+        if not territory:
+            return None
+        user_territories = frappe.get_all("User Permission",
+            filters={"user": user, "allow": "Territory",
+                      "applicable_for": ["in", ["", "Sales Order"]]},
+            pluck="for_value")
         if not user_territories:
-            return None  # No territory restrictions for user
-        
-        if doc_territory not in user_territories:
-            return False  # Deny - territory mismatch
-        
-        return None  # Allow - territory matches
-        
+            return None  # No territory restrictions for this user
+        if territory not in user_territories:
+            return False
+        return None
     except Exception:
-        return None  # Error - defer to standard
+        return None
 ```
 
 ---
 
-## Pattern 2: Comprehensive permission_query_conditions
+## Pattern 2: permission_query_conditions with Team and Territory
 
 ```python
 # myapp/permissions.py
 import frappe
 
-def sales_order_query_conditions(user):
+def sales_order_query(user):
     """
-    Complete permission query implementation.
-    
-    Args:
-        user: User email or None for current user
-    
-    Returns:
-        str: SQL WHERE clause fragment (empty string for no restriction)
-        
-    NEVER throw errors - return restrictive fallback.
+    Return SQL WHERE clause fragment for list filtering.
+
+    ALWAYS return a string. Empty string = no restriction.
+    ALWAYS use frappe.db.escape(). NEVER throw.
     """
     try:
-        if not user:
-            user = frappe.session.user
-        
-        # Guest users see nothing
+        user = user or frappe.session.user
+
         if user == "Guest":
-            return "1=0"
-        
-        # Administrator sees all
+            return "1=0"  # Guest sees nothing
+
         if user == "Administrator":
             return ""
-        
+
         roles = frappe.get_roles(user)
-        
-        # System Manager sees all
+
         if "System Manager" in roles:
             return ""
-        
+
         conditions = []
-        
-        # Sales Manager sees all non-confidential + assigned
+
+        # Sales Manager: all non-confidential + own confidential
         if "Sales Manager" in roles:
             conditions.append(f"""
                 (`tabSales Order`.is_confidential = 0
@@ -186,14 +157,13 @@ def sales_order_query_conditions(user):
                     AND `tabSales Order Access`.user = {frappe.db.escape(user)}
                 ))
             """)
-        
-        # Sales User sees own + team (if team configured)
+
+        # Sales User: own records + team records
         elif "Sales User" in roles:
-            team_condition = get_team_condition(user)
-            if team_condition:
+            team_sql = _get_team_condition(user)
+            if team_sql:
                 conditions.append(f"""
-                    (`tabSales Order`.owner = {frappe.db.escape(user)}
-                    OR {team_condition})
+                    (`tabSales Order`.owner = {frappe.db.escape(user)} OR {team_sql})
                     AND `tabSales Order`.is_confidential = 0
                 """)
             else:
@@ -201,81 +171,60 @@ def sales_order_query_conditions(user):
                     `tabSales Order`.owner = {frappe.db.escape(user)}
                     AND `tabSales Order`.is_confidential = 0
                 """)
-        
+
         # Default: own non-confidential records
         else:
             conditions.append(f"""
                 `tabSales Order`.owner = {frappe.db.escape(user)}
                 AND `tabSales Order`.is_confidential = 0
             """)
-        
-        # Add territory filter if applicable
-        territory_condition = get_territory_condition(user)
-        if territory_condition:
-            conditions.append(territory_condition)
-        
+
+        # Territory filter
+        territory_sql = _get_territory_condition(user)
+        if territory_sql:
+            conditions.append(territory_sql)
+
         return " AND ".join([f"({c.strip()})" for c in conditions])
-        
+
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"Query conditions error for {user}"
-        )
-        # SAFE FALLBACK: Most restrictive
+        frappe.log_error(frappe.get_traceback(), f"Query conditions error for {user}")
         return f"`tabSales Order`.owner = {frappe.db.escape(frappe.session.user)}"
 
 
-def get_team_condition(user):
-    """Get team-based filter condition - returns None on error."""
+def _get_team_condition(user):
+    """Build SQL for team members. Returns None on error."""
     try:
-        # Get user's department/team
         department = frappe.db.get_value("User", user, "department")
         if not department:
             return None
-        
-        # Get team members
-        team_members = frappe.get_all(
-            "User",
-            filters={"department": department, "enabled": 1},
-            pluck="name"
-        )
-        
-        if not team_members or len(team_members) <= 1:
+        team = frappe.get_all("User",
+            filters={"department": department, "enabled": 1}, pluck="name")
+        if not team or len(team) <= 1:
             return None
-        
-        escaped = ", ".join([frappe.db.escape(u) for u in team_members])
+        escaped = ", ".join([frappe.db.escape(u) for u in team])
         return f"`tabSales Order`.owner IN ({escaped})"
-        
     except Exception:
         return None
 
 
-def get_territory_condition(user):
-    """Get territory-based filter condition - returns None on error."""
+def _get_territory_condition(user):
+    """Build SQL for territory filter. Returns None on error."""
     try:
-        territories = frappe.get_all(
-            "User Permission",
-            filters={
-                "user": user,
-                "allow": "Territory",
-                "applicable_for": ["in", ["", "Sales Order"]]
-            },
-            pluck="for_value"
-        )
-        
+        territories = frappe.get_all("User Permission",
+            filters={"user": user, "allow": "Territory",
+                      "applicable_for": ["in", ["", "Sales Order"]]},
+            pluck="for_value")
         if not territories:
             return None
-        
         escaped = ", ".join([frappe.db.escape(t) for t in territories])
         return f"(`tabSales Order`.territory IN ({escaped}) OR `tabSales Order`.territory IS NULL)"
-        
     except Exception:
         return None
 ```
 
 ---
 
-## Pattern 3: API Endpoint with Permission Handling
+## Pattern 3: API Endpoint Permission Checks
 
 ```python
 # myapp/api.py
@@ -284,393 +233,121 @@ from frappe import _
 
 @frappe.whitelist()
 def get_order_details(order_name):
-    """
-    API endpoint with comprehensive permission handling.
-    """
-    # Validate input
+    """API endpoint with layered permission checks."""
     if not order_name:
-        frappe.throw(
-            _("Order name is required"),
-            exc=frappe.ValidationError
-        )
-    
-    # Check existence
+        frappe.throw(_("Order name required"), exc=frappe.ValidationError)
+
     if not frappe.db.exists("Sales Order", order_name):
-        frappe.throw(
-            _("Sales Order {0} not found").format(order_name),
-            exc=frappe.DoesNotExistError
-        )
-    
-    # Check permission - throws PermissionError automatically
+        frappe.throw(_("Sales Order {0} not found").format(order_name),
+            exc=frappe.DoesNotExistError)
+
+    # Throws PermissionError automatically if denied
     frappe.has_permission("Sales Order", "read", order_name, throw=True)
-    
-    # Get document
+
     doc = frappe.get_doc("Sales Order", order_name)
-    
-    # Filter fields based on permission level
-    result = {
-        "name": doc.name,
-        "customer": doc.customer,
-        "status": doc.status,
-        "grand_total": doc.grand_total
-    }
-    
-    # Add sensitive fields only for managers
+    result = {"name": doc.name, "customer": doc.customer, "status": doc.status}
+
+    # Filter sensitive fields by role
     if "Sales Manager" in frappe.get_roles():
         result["margin"] = doc.get("margin")
         result["cost"] = doc.get("cost")
-    
+
     return result
 
 
 @frappe.whitelist()
 def approve_order(order_name):
-    """
-    Approval endpoint with role check and audit.
-    """
-    # Role restriction
+    """Role-restricted endpoint with audit logging."""
     frappe.only_for(["Sales Manager", "General Manager"])
-    
-    # Get document
+
     doc = frappe.get_doc("Sales Order", order_name)
-    
-    # Check document-level permission
     if not doc.has_permission("write"):
-        frappe.throw(
-            _("You don't have permission to approve this order"),
-            exc=frappe.PermissionError
-        )
-    
-    # Check business rules
-    if doc.status != "Pending Approval":
-        frappe.throw(
-            _("Only orders with 'Pending Approval' status can be approved"),
-            exc=frappe.ValidationError
-        )
-    
-    # Perform action
+        frappe.throw(_("Cannot approve — no write permission"),
+            exc=frappe.PermissionError)
+
     doc.status = "Approved"
     doc.approved_by = frappe.session.user
-    doc.approved_on = frappe.utils.now()
     doc.save()
-    
-    # Audit log
-    frappe.get_doc({
-        "doctype": "Activity Log",
-        "subject": f"Order {order_name} approved",
-        "reference_doctype": "Sales Order",
-        "reference_name": order_name,
-        "content": f"Approved by {frappe.session.user}"
-    }).insert(ignore_permissions=True)
-    
-    return {"status": "success", "message": _("Order approved successfully")}
+
+    return {"status": "success"}
 
 
 @frappe.whitelist()
-def bulk_update_orders(orders, status):
-    """
-    Bulk operation with per-document permission check.
-    """
-    if not orders:
-        frappe.throw(_("No orders specified"))
-    
-    results = {
-        "success": [],
-        "failed": [],
-        "permission_denied": []
-    }
-    
-    for order_name in orders:
-        # Check existence
-        if not frappe.db.exists("Sales Order", order_name):
-            results["failed"].append({
-                "name": order_name,
-                "error": "Not found"
-            })
+def bulk_update(orders, status):
+    """Bulk operation with per-document permission check."""
+    orders = frappe.parse_json(orders) if isinstance(orders, str) else orders
+    results = {"success": [], "failed": [], "permission_denied": []}
+
+    for name in orders:
+        if not frappe.db.exists("Sales Order", name):
+            results["failed"].append({"name": name, "error": "Not found"})
             continue
-        
-        # Check permission
-        if not frappe.has_permission("Sales Order", "write", order_name):
-            results["permission_denied"].append(order_name)
+        if not frappe.has_permission("Sales Order", "write", name):
+            results["permission_denied"].append(name)
             continue
-        
-        # Update
         try:
-            frappe.db.set_value("Sales Order", order_name, "status", status)
-            results["success"].append(order_name)
+            frappe.db.set_value("Sales Order", name, "status", status)
+            results["success"].append(name)
         except Exception as e:
-            results["failed"].append({
-                "name": order_name,
-                "error": str(e)
-            })
-    
+            results["failed"].append({"name": name, "error": str(e)})
+
     frappe.db.commit()
-    
-    # Notify if any permission denied
-    if results["permission_denied"]:
-        frappe.msgprint(
-            _("You don't have permission to update: {0}").format(
-                ", ".join(results["permission_denied"])
-            ),
-            indicator="orange"
-        )
-    
     return results
 ```
 
 ---
 
-## Pattern 4: Controller with Permission Checks
+## Pattern 4: Graceful Permission Degradation
 
 ```python
-# myapp/doctype/confidential_document/confidential_document.py
-import frappe
-from frappe import _
-from frappe.model.document import Document
-
-class ConfidentialDocument(Document):
-    def validate(self):
-        """Validate with permission checks."""
-        # Check if user can set confidential flag
-        if self.is_confidential and not self.is_new():
-            old_doc = self.get_doc_before_save()
-            if old_doc and not old_doc.is_confidential:
-                # Changing to confidential - need special permission
-                if not self.has_confidential_permission():
-                    frappe.throw(
-                        _("You don't have permission to mark documents as confidential"),
-                        exc=frappe.PermissionError
-                    )
-    
-    def has_confidential_permission(self):
-        """Check if user can set confidential flag."""
-        allowed_roles = ["System Manager", "Compliance Manager"]
-        return any(role in frappe.get_roles() for role in allowed_roles)
-    
-    def before_save(self):
-        """Additional permission checks before save."""
-        if self.is_new():
-            return
-        
-        # Check if user is trying to access others' confidential doc
-        if self.is_confidential and self.owner != frappe.session.user:
-            if not self.is_in_access_list(frappe.session.user):
-                frappe.throw(
-                    _("You don't have permission to modify this confidential document"),
-                    exc=frappe.PermissionError
-                )
-    
-    def is_in_access_list(self, user):
-        """Check if user is in access list."""
-        try:
-            return frappe.db.exists(
-                "Confidential Document Access",
-                {"parent": self.name, "user": user}
-            )
-        except Exception:
-            return False
-    
-    @frappe.whitelist()
-    def grant_access(self, user):
-        """Grant access to user with permission check."""
-        # Only owner or admin can grant access
-        if self.owner != frappe.session.user:
-            if "System Manager" not in frappe.get_roles():
-                frappe.throw(
-                    _("Only the document owner can grant access"),
-                    exc=frappe.PermissionError
-                )
-        
-        # Validate user exists
-        if not frappe.db.exists("User", user):
-            frappe.throw(_("User {0} not found").format(user))
-        
-        # Add to access list
-        if not self.is_in_access_list(user):
-            self.append("access_list", {"user": user})
-            self.save()
-        
-        return {"status": "success"}
-    
-    @frappe.whitelist()
-    def revoke_access(self, user):
-        """Revoke access from user with permission check."""
-        if self.owner != frappe.session.user:
-            if "System Manager" not in frappe.get_roles():
-                frappe.throw(
-                    _("Only the document owner can revoke access"),
-                    exc=frappe.PermissionError
-                )
-        
-        # Remove from access list
-        self.access_list = [d for d in self.access_list if d.user != user]
-        self.save()
-        
-        return {"status": "success"}
-```
-
----
-
-## Pattern 5: Graceful Permission Degradation
-
-```python
-# myapp/api.py
-import frappe
-from frappe import _
-
 @frappe.whitelist()
 def get_dashboard_data():
-    """
-    Return dashboard data based on user permissions.
-    No errors - just returns what user can see.
-    """
-    data = {
-        "widgets": [],
-        "stats": {},
-        "recent_items": []
-    }
-    
-    # Sales widget - if has Sales Order read permission
+    """Return data based on user permissions — no errors, just filtered results."""
+    data = {"widgets": [], "stats": {}}
+
     if frappe.has_permission("Sales Order", "read"):
         try:
-            data["widgets"].append({
-                "type": "sales",
-                "data": get_sales_summary()
-            })
-            data["stats"]["sales"] = get_sales_stats()
+            data["widgets"].append({"type": "sales", "data": get_sales_summary()})
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "Dashboard: Sales Widget Error")
-    
-    # Purchase widget - if has Purchase Order read permission
+            frappe.log_error(frappe.get_traceback(), "Dashboard: Sales Widget")
+
     if frappe.has_permission("Purchase Order", "read"):
         try:
-            data["widgets"].append({
-                "type": "purchase",
-                "data": get_purchase_summary()
-            })
-            data["stats"]["purchase"] = get_purchase_stats()
+            data["widgets"].append({"type": "purchase", "data": get_purchase_summary()})
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "Dashboard: Purchase Widget Error")
-    
-    # HR widget - if has Employee read permission
-    if frappe.has_permission("Employee", "read"):
-        try:
-            data["widgets"].append({
-                "type": "hr",
-                "data": get_hr_summary()
-            })
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "Dashboard: HR Widget Error")
-    
-    # Recent items - filter by permission
-    try:
-        data["recent_items"] = get_recent_items_with_permission()
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Dashboard: Recent Items Error")
-    
+            frappe.log_error(frappe.get_traceback(), "Dashboard: Purchase Widget")
+
     return data
-
-
-def get_recent_items_with_permission():
-    """Get recent items user has access to."""
-    recent = []
-    
-    doctypes = ["Sales Order", "Purchase Order", "Quotation"]
-    
-    for dt in doctypes:
-        if not frappe.has_permission(dt, "read"):
-            continue
-        
-        try:
-            # Use get_list to respect permissions
-            items = frappe.get_list(
-                dt,
-                fields=["name", "modified", "status"],
-                order_by="modified desc",
-                limit=5
-            )
-            
-            for item in items:
-                recent.append({
-                    "doctype": dt,
-                    "name": item.name,
-                    "modified": item.modified,
-                    "status": item.status
-                })
-        except Exception:
-            pass  # Skip this doctype on error
-    
-    # Sort by modified date
-    recent.sort(key=lambda x: x["modified"], reverse=True)
-    
-    return recent[:10]
 ```
 
 ---
 
-## Pattern 6: Security Audit Logging
+## Pattern 5: Security Audit Logging
 
 ```python
-# myapp/permissions.py
-import frappe
-
-def log_permission_check(doc, ptype, user, result):
-    """Log permission checks for audit."""
-    if not should_log_permission(doc, ptype):
-        return
-    
+def log_access_denied(doc, user, ptype, reason=""):
+    """Log denied access for security audit. NEVER let this break the permission check."""
     try:
         frappe.get_doc({
-            "doctype": "Permission Audit Log",
-            "user": user,
-            "doctype_name": doc.doctype if hasattr(doc, "doctype") else "Unknown",
-            "document": doc.name if hasattr(doc, "name") else "Unknown",
-            "permission_type": ptype,
-            "result": "Allowed" if result is None else "Denied",
-            "timestamp": frappe.utils.now()
+            "doctype": "Activity Log",
+            "subject": f"Access Denied: {ptype} on {getattr(doc, 'name', 'unknown')}",
+            "content": f"User: {user}, Reason: {reason}",
+            "reference_doctype": getattr(doc, "doctype", None),
+            "reference_name": getattr(doc, "name", None),
         }).insert(ignore_permissions=True)
     except Exception:
-        # Never break permission check for logging failure
-        pass
-
-
-def should_log_permission(doc, ptype):
-    """Determine if this permission check should be logged."""
-    # Log sensitive operations
-    sensitive_doctypes = ["Employee", "Salary Slip", "Bank Account"]
-    sensitive_ptypes = ["write", "delete", "submit", "cancel"]
-    
-    doctype = doc.doctype if hasattr(doc, "doctype") else None
-    
-    return doctype in sensitive_doctypes or ptype in sensitive_ptypes
-
-
-def log_access_denied(doc, ptype, user, reason):
-    """Log access denied events."""
-    try:
-        frappe.get_doc({
-            "doctype": "Security Event",
-            "event_type": "Access Denied",
-            "user": user,
-            "reference_doctype": doc.doctype if hasattr(doc, "doctype") else None,
-            "reference_name": doc.name if hasattr(doc, "name") else None,
-            "details": f"Permission: {ptype}, Reason: {reason}",
-            "timestamp": frappe.utils.now(),
-            "ip_address": frappe.local.request_ip if hasattr(frappe.local, "request_ip") else None
-        }).insert(ignore_permissions=True)
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Security Event Log Error")
+        pass  # NEVER break permission check for logging failure
 ```
 
 ---
 
-## Quick Reference: Permission Error Handling
+## Quick Reference
 
-| Scenario | Method | Error Type |
-|----------|--------|------------|
-| Check before action | `frappe.has_permission(throw=True)` | PermissionError |
-| Document check | `doc.check_permission()` | PermissionError |
-| Role restriction | `frappe.only_for()` | PermissionError |
-| Custom denial | `frappe.throw(exc=PermissionError)` | PermissionError |
-| has_permission hook | `return False` | N/A (silent deny) |
-| query_conditions | Return restrictive SQL | N/A (filter only) |
+| Scenario | Method | Returns on Deny |
+|----------|--------|----------------|
+| has_permission hook | `return False` | Silent deny |
+| permission_query_conditions | Return restrictive SQL | Filtered list |
+| API endpoint | `frappe.has_permission(throw=True)` | HTTP 403 |
+| Role restriction | `frappe.only_for(["Role"])` | HTTP 403 |
+| Document method | `doc.check_permission("write")` | HTTP 403 |
+| Custom throw | `frappe.throw(msg, exc=PermissionError)` | HTTP 403 |

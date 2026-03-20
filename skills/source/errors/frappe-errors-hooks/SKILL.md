@@ -1,10 +1,14 @@
 ---
 name: frappe-errors-hooks
 description: >
-  Use when debugging hooks.py errors in ERPNext/Frappe. Covers doc_events
-  errors, scheduler failures, boot session issues, and app initialization
-  problems for v14/v15/v16. Keywords: hooks.py error, doc_events error,
-  scheduler error, boot session error, app initialization error.
+  Use when debugging hooks.py errors in Frappe/ERPNext. Covers hook not firing
+  (typo, wrong dict structure), circular imports, app_include_js path errors,
+  scheduler_events not running, doc_events on wrong DocType,
+  permission_query_conditions SQL errors, override_doctype_class import
+  failures, extend_doctype_class [v16+] conflicts, fixtures not loading.
+  Error diagnosis by hook type for v14/v15/v16.
+  Keywords: hooks.py error, hook not firing, scheduler not running,
+  doc_events error, circular import, fixtures error, override class error.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:
@@ -12,451 +16,425 @@ metadata:
   version: "2.0"
 ---
 
-# ERPNext Hooks - Error Handling
+# Frappe Hooks Error Diagnosis & Resolution
 
-This skill covers error handling patterns for hooks.py configurations. For syntax, see `frappe-syntax-hooks`. For implementation workflows, see `frappe-impl-hooks`.
-
-**Version**: v14/v15/v16 compatible
+Cross-ref: `frappe-syntax-hooks` (syntax), `frappe-impl-hooks` (workflows), `frappe-errors-controllers` (controller errors).
 
 ---
 
-## Hooks Error Handling Overview
+## Error-to-Fix Mapping Table
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ HOOKS HAVE UNIQUE ERROR HANDLING CHARACTERISTICS                    │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ ✅ Full Python power (try/except, raise)                            │
-│ ⚠️ Multiple handlers in chain - one failure affects others         │
-│ ⚠️ Some hooks are silent (scheduler, permission_query)             │
-│ ⚠️ Transaction behavior varies by hook type                        │
-│                                                                     │
-│ Key differences from controllers:                                   │
-│ • doc_events runs AFTER controller methods                          │
-│ • Multiple apps can register handlers (order matters!)              │
-│ • Scheduler has NO user feedback - logging is critical              │
-│ • Permission hooks should NEVER throw errors                        │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Error / Symptom | Cause | Fix |
+|-----------------|-------|-----|
+| Hook not firing at all | Typo in dotted path | Verify module path matches actual file location |
+| `ImportError` on bench start | Wrong module path or circular import | Fix import path; break circular dependency |
+| `AttributeError: module has no attribute` | Function name typo in hooks.py | Match function name exactly to Python definition |
+| `app_include_js` not loading | Path missing `assets/` prefix or wrong extension | Use `"assets/myapp/js/file.js"` format |
+| scheduler_events not running | Scheduler disabled or workers down | `bench scheduler enable`, check `bench doctor` |
+| doc_events handler never called | DocType name misspelled in dict key | Use exact DocType name with spaces: `"Sales Invoice"` |
+| `permission_query_conditions` breaks list view | SQL syntax error or frappe.throw() in handler | Return valid SQL string; NEVER throw |
+| `override_doctype_class` import failure | Parent class import path changed between versions | Pin import to correct module path for target version |
+| `extend_doctype_class` [v16+] method conflict | Two extensions define same method name | Rename conflicting methods; check hook resolution order |
+| Fixtures not loading on install | Wrong `dt` key or DocType doesn't exist on target | Verify DocType exists before export; check filter syntax |
+| `extend_bootinfo` breaks login | Unhandled exception in boot handler | Wrap ALL bootinfo code in try/except |
+| Wildcard `"*"` handler breaks all saves | Unhandled exception in wildcard doc_events | ALWAYS wrap wildcard handlers in try/except |
+| Hook fires but changes lost | Missing `frappe.db.commit()` in scheduler | Add explicit commit in scheduler/background tasks |
+| Multiple handler chain broken | First handler throws, others never run | Isolate non-critical ops in try/except |
 
 ---
 
-## Main Decision: Error Handling by Hook Type
+## Hook Registration Errors
+
+### Hook Not Firing — Diagnosis Checklist
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ WHICH HOOK TYPE ARE YOU USING?                                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ ► doc_events (validate, on_update, on_submit, etc.)                     │
-│   └─► Same as controllers: frappe.throw() rolls back in validate        │
-│   └─► Multiple handlers: first error stops chain                        │
-│   └─► Isolate non-critical operations in try/except                     │
-│                                                                         │
-│ ► scheduler_events (daily, hourly, cron)                                │
-│   └─► NO user feedback - frappe.log_error() is essential                │
-│   └─► ALWAYS use try/except around operations                           │
-│   └─► MUST call frappe.db.commit() manually                             │
-│                                                                         │
-│ ► permission_query_conditions                                           │
-│   └─► NEVER throw errors - return empty string on error                 │
-│   └─► Silent failures break list views                                  │
-│   └─► Log errors but return safe fallback                               │
-│                                                                         │
-│ ► has_permission                                                        │
-│   └─► NEVER throw errors - return False on error                        │
-│   └─► Return None to defer to default permission                        │
-│                                                                         │
-│ ► override_doctype_class / extend_doctype_class                         │
-│   └─► ALWAYS call super() in try/except                                 │
-│   └─► Parent errors should usually propagate                            │
-│                                                                         │
-│ ► extend_bootinfo                                                       │
-│   └─► Errors break page load entirely!                                  │
-│   └─► ALWAYS wrap in try/except with fallback                           │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+IS YOUR HOOK NOT FIRING?
+│
+├─► Check 1: Is the dotted path correct?
+│   hooks.py: "myapp.events.sales.validate"
+│   File:     myapp/events/sales.py → def validate(doc, method=None):
+│   COMMON MISTAKE: "myapp.events.sales_invoice.validate" when file is sales.py
+│
+├─► Check 2: Is the dict structure correct?
+│   doc_events uses NESTED dict: {"Sales Invoice": {"validate": "path"}}
+│   scheduler_events uses LIST: {"daily": ["path1", "path2"]}
+│   permission_query uses FLAT dict: {"Sales Invoice": "path"}
+│
+├─► Check 3: Is bench restarted after hooks.py change?
+│   ALWAYS run: bench restart (or bench clear-cache for dev)
+│
+├─► Check 4: Is the DocType name exact?
+│   "Sales Invoice" NOT "SalesInvoice" NOT "sales_invoice"
+│   Use exact DocType name as shown in Frappe UI
+│
+└─► Check 5: Is the app installed on the site?
+    bench --site mysite list-apps
 ```
 
----
-
-## doc_events Error Handling
-
-### Transaction Behavior (Same as Controllers)
-
-| Event | frappe.throw() Effect |
-|-------|----------------------|
-| `validate` | ✅ Full rollback - document NOT saved |
-| `before_save` | ✅ Full rollback - document NOT saved |
-| `on_update` | ⚠️ Document IS saved, error shown |
-| `after_insert` | ⚠️ Document IS saved, error shown |
-| `on_submit` | ⚠️ docstatus=1, error shown |
-| `on_cancel` | ⚠️ docstatus=2, error shown |
-
-### Multiple Handler Chain
+### Circular Import Errors
 
 ```python
-# hooks.py - Multiple apps can register handlers
-# App A
+# ❌ CAUSES ImportError — circular dependency
+# myapp/hooks.py imports from myapp.events
+# myapp/events/sales.py imports from myapp.hooks
+
+# ✅ CORRECT — break the cycle
+# Move shared constants to myapp/constants.py
+# Import from constants in both hooks.py and events/
+```
+
+**Rule**: NEVER import from hooks.py in your event handlers. hooks.py is read by the framework, not imported by your code.
+
+### Wrong Dict Structure by Hook Type
+
+```python
+# ❌ WRONG — doc_events needs nested dict, not flat
+doc_events = {
+    "Sales Invoice": "myapp.events.validate"  # WRONG: string, not dict
+}
+
+# ✅ CORRECT
 doc_events = {
     "Sales Invoice": {
-        "validate": "app_a.events.validate_si"  # Runs first
+        "validate": "myapp.events.sales.validate"
     }
 }
 
-# App B  
-doc_events = {
-    "Sales Invoice": {
-        "validate": "app_b.events.validate_si"  # Runs second
-    }
+# ❌ WRONG — scheduler_events daily needs list
+scheduler_events = {
+    "daily": "myapp.tasks.daily_sync"  # WRONG: string, not list
 }
 
-# If App A throws error, App B's handler NEVER runs!
+# ✅ CORRECT
+scheduler_events = {
+    "daily": ["myapp.tasks.daily_sync"]
+}
+
+# ❌ WRONG — cron needs nested dict with list values
+scheduler_events = {
+    "cron": ["0 9 * * *", "myapp.tasks.morning"]  # WRONG structure
+}
+
+# ✅ CORRECT
+scheduler_events = {
+    "cron": {
+        "0 9 * * 1-5": ["myapp.tasks.morning_report"]
+    }
+}
 ```
 
-### Pattern: Validate Handler
+---
+
+## app_include_js / app_include_css Errors
 
 ```python
-# myapp/events/sales_invoice.py
-import frappe
-from frappe import _
+# ❌ WRONG — missing assets/ prefix
+app_include_js = "js/myapp.js"
 
+# ❌ WRONG — using Python module path instead of file path
+app_include_js = "myapp.public.js.myapp"
+
+# ✅ CORRECT — full asset path
+app_include_js = "assets/myapp/js/myapp.js"
+
+# ✅ CORRECT — multiple files as list
+app_include_js = ["assets/myapp/js/app.js", "assets/myapp/js/utils.js"]
+app_include_css = "assets/myapp/css/myapp.css"
+```
+
+**Diagnosis**: If JS/CSS not loading, check browser DevTools Network tab for 404. Run `bench build` after adding new files. ALWAYS verify the file exists at `myapp/public/js/myapp.js`.
+
+---
+
+## scheduler_events Not Running
+
+### Diagnosis Steps
+
+```bash
+# Step 1: Is scheduler enabled?
+bench scheduler status
+# If disabled: bench scheduler enable
+
+# Step 2: Are workers running?
+bench doctor
+# Look for: "Workers online: X"
+# If 0: bench start (dev) or supervisorctl restart all (prod)
+
+# Step 3: Check Scheduled Job Log
+# In Frappe UI: /api/method/frappe.client.get_list?doctype=Scheduled Job Log&limit=5
+
+# Step 4: Check Error Log for task failures
+# In Frappe UI: /app/error-log
+
+# Step 5: Is the task registered?
+bench execute frappe.utils.scheduler.get_all_tasks
+```
+
+### Common Scheduler Failures
+
+```python
+# ❌ PROBLEM: Task runs but changes not persisted
+def daily_sync():
+    for item in frappe.get_all("Item", limit=100):
+        frappe.db.set_value("Item", item.name, "synced", 1)
+    # MISSING: frappe.db.commit() — ALL changes lost!
+
+# ✅ FIX: ALWAYS commit in scheduler tasks
+def daily_sync():
+    for item in frappe.get_all("Item", limit=100):
+        frappe.db.set_value("Item", item.name, "synced", 1)
+    frappe.db.commit()
+
+# ❌ PROBLEM: Task fails silently — no debugging possible
+def daily_task():
+    try:
+        process_records()
+    except Exception:
+        pass  # Silent death
+
+# ✅ FIX: ALWAYS log errors in scheduler
+def daily_task():
+    try:
+        process_records()
+        frappe.db.commit()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Daily Task Error")
+```
+
+---
+
+## doc_events Errors
+
+### Error Handling by Event Phase
+
+| Event | Throw Effect | Transaction | Pattern |
+|-------|-------------|-------------|---------|
+| `validate` | Prevents save, full rollback | Pre-write | Collect errors, throw once |
+| `before_save` | Prevents save, full rollback | Pre-write | Same as validate |
+| `on_update` | Doc already saved, error shown | Post-write | Isolate non-critical ops |
+| `after_insert` | Doc already saved, error shown | Post-write | Isolate non-critical ops |
+| `on_submit` | Doc already submitted | Post-write | Isolate non-critical ops |
+| `on_cancel` | Doc already cancelled | Post-write | Isolate non-critical ops |
+
+### Multiple Handler Chain Problem
+
+```python
+# If App A and App B both register validate for Sales Invoice:
+# App A's handler throws → App B's handler NEVER runs
+
+# ✅ ALWAYS be aware: your handler is not alone
 def validate(doc, method=None):
-    """Validate handler with proper error handling."""
+    """Collect errors, throw once at end."""
     errors = []
-    
-    # Collect validation errors
     if doc.grand_total < 0:
         errors.append(_("Total cannot be negative"))
-    
-    if doc.custom_field and not doc.customer:
-        errors.append(_("Customer required when custom field is set"))
-    
-    # Throw all at once
     if errors:
         frappe.throw("<br>".join(errors))
-```
 
-### Pattern: on_update Handler (Isolated Operations)
-
-```python
+# ✅ For on_update: isolate independent operations
 def on_update(doc, method=None):
-    """Post-save handler with isolated operations."""
-    # Critical operation - let errors propagate
-    update_linked_records(doc)
-    
-    # Non-critical operations - isolate errors
     try:
         send_notification(doc)
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"Notification failed for {doc.name}"
-        )
-    
+        frappe.log_error(frappe.get_traceback(), f"Notify error: {doc.name}")
     try:
-        sync_to_external(doc)
+        sync_external(doc)
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"External sync failed for {doc.name}"
-        )
+        frappe.log_error(frappe.get_traceback(), f"Sync error: {doc.name}")
+```
+
+### NEVER Commit in doc_events
+
+```python
+# ❌ BREAKS transaction management
+def on_update(doc, method=None):
+    frappe.db.set_value("Counter", "main", "count", 100)
+    frappe.db.commit()  # Partial commit — dangerous!
+
+# ✅ Framework handles commits automatically
+def on_update(doc, method=None):
+    frappe.db.set_value("Counter", "main", "count", 100)
 ```
 
 ---
 
-## scheduler_events Error Handling
+## Permission Hook Errors
 
-### Critical: No User Feedback!
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ ⚠️  SCHEDULER TASKS HAVE NO USER - LOGGING IS ESSENTIAL             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ • No one sees frappe.throw() - task just fails silently             │
-│ • No automatic email on failure (unless configured)                 │
-│ • frappe.log_error() is your ONLY debugging tool                    │
-│ • Always commit changes manually                                    │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Pattern: Scheduler Task with Error Handling
+### permission_query_conditions — NEVER Throw
 
 ```python
-# myapp/tasks.py
-import frappe
-
-def daily_sync():
-    """Daily sync task with comprehensive error handling."""
-    results = {
-        "processed": 0,
-        "errors": []
-    }
-    
-    try:
-        # Get records to process (ALWAYS with limit!)
-        records = frappe.get_all(
-            "Sales Invoice",
-            filters={"sync_status": "Pending"},
-            limit=500
-        )
-        
-        for record in records:
-            try:
-                process_record(record.name)
-                results["processed"] += 1
-            except Exception as e:
-                results["errors"].append(f"{record.name}: {str(e)}")
-                frappe.log_error(
-                    frappe.get_traceback(),
-                    f"Sync error: {record.name}"
-                )
-        
-        # REQUIRED: Commit changes
-        frappe.db.commit()
-        
-    except Exception as e:
-        # Log fatal errors
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Daily Sync Fatal Error"
-        )
-        return
-    
-    # Log summary
-    if results["errors"]:
-        summary = f"Processed: {results['processed']}, Errors: {len(results['errors'])}"
-        frappe.log_error(
-            summary + "\n\n" + "\n".join(results["errors"][:50]),
-            "Daily Sync Summary"
-        )
-```
-
-### Pattern: Scheduler with Batch Commits
-
-```python
-def process_large_dataset():
-    """Process large dataset with periodic commits."""
-    BATCH_SIZE = 100
-    
-    try:
-        records = frappe.get_all("Item", limit=5000)
-        total = len(records)
-        
-        for i in range(0, total, BATCH_SIZE):
-            batch = records[i:i + BATCH_SIZE]
-            
-            for record in batch:
-                try:
-                    update_item(record.name)
-                except Exception:
-                    frappe.log_error(
-                        frappe.get_traceback(),
-                        f"Item update error: {record.name}"
-                    )
-            
-            # Commit after each batch
-            frappe.db.commit()
-            
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Batch Processing Error")
-```
-
----
-
-## Permission Hooks Error Handling
-
-### permission_query_conditions - NEVER Throw!
-
-```python
-# ❌ WRONG - Breaks list view entirely!
+# ❌ BREAKS list view entirely
 def query_conditions(user):
-    if not user:
-        frappe.throw("User required")  # DON'T DO THIS!
-    return f"owner = '{user}'"
+    if "Sales User" not in frappe.get_roles(user):
+        frappe.throw("Access denied")  # LIST VIEW CRASHES
+    return f"owner = '{user}'"  # Also: SQL injection!
 
-# ✅ CORRECT - Return safe fallback
+# ✅ CORRECT — safe fallback, escaped values
 def query_conditions(user):
-    """Permission query with error handling."""
     try:
-        if not user:
-            user = frappe.session.user
-        
+        user = user or frappe.session.user
         if "System Manager" in frappe.get_roles(user):
-            return ""  # No restrictions
-        
+            return ""
         return f"`tabSales Invoice`.owner = {frappe.db.escape(user)}"
-        
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Permission Query Error"
-        )
-        # Safe fallback - restrict to own records
+        frappe.log_error(frappe.get_traceback(), "Query Conditions Error")
         return f"`tabSales Invoice`.owner = {frappe.db.escape(frappe.session.user)}"
 ```
 
-### has_permission - NEVER Throw!
+**Note**: permission_query_conditions only affects `frappe.db.get_list()`, NOT `frappe.db.get_all()`.
+
+### has_permission — NEVER Throw
 
 ```python
-# ❌ WRONG - Breaks document access!
+# ❌ BREAKS document access
 def has_permission(doc, user=None, permission_type=None):
     if doc.status == "Locked":
-        frappe.throw("Document is locked")  # DON'T DO THIS!
+        frappe.throw("Locked")  # DOCUMENT INACCESSIBLE
 
-# ✅ CORRECT - Return boolean or None
+# ✅ Return False to deny, None to defer
 def has_permission(doc, user=None, permission_type=None):
-    """Document permission check with error handling."""
     try:
         user = user or frappe.session.user
-        
-        # Deny access to locked documents
         if doc.status == "Locked" and permission_type == "write":
             return False
-        
-        # Custom logic
-        if permission_type == "delete":
-            if doc.has_linked_records():
-                return False
-        
-        # Return None to defer to default permission system
-        return None
-        
+        return None  # Defer to default permission system
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"Permission check error: {doc.name}"
-        )
-        # Safe fallback - defer to default
+        frappe.log_error(frappe.get_traceback(), "Permission Error")
         return None
 ```
 
 ---
 
-## Override Hooks Error Handling
+## Override & Extend Errors
 
-### override_doctype_class
+### override_doctype_class — Import Failures
 
 ```python
-# myapp/overrides.py
-from erpnext.selling.doctype.sales_order.sales_order import SalesOrder
-import frappe
-from frappe import _
+# ❌ COMMON: Import path changes between ERPNext versions
+# v14 path:
+override_doctype_class = {
+    "Sales Invoice": "myapp.overrides.CustomSI"
+}
+# myapp/overrides.py:
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
+# This path may change in v15/v16!
 
-class CustomSalesOrder(SalesOrder):
+# ✅ ALWAYS call super(), re-raise validation errors
+class CustomSalesInvoice(SalesInvoice):
     def validate(self):
-        """Override with proper error handling."""
-        # ALWAYS call parent first in try/except
         try:
             super().validate()
         except frappe.ValidationError:
-            # Re-raise validation errors
+            raise  # ALWAYS re-raise validation errors
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "Parent validate error")
             raise
-        except Exception as e:
-            frappe.log_error(frappe.get_traceback(), "Parent Validate Error")
-            raise
-        
-        # Custom validation
-        self.custom_validate()
-    
-    def custom_validate(self):
-        if self.custom_approval_required and not self.custom_approved:
-            frappe.throw(_("Approval required before saving"))
+        self.custom_validation()
 ```
 
-### extend_doctype_class (V16+)
+**Warning**: Only ONE app's override_doctype_class is active per DocType ("last writer wins"). Use extend_doctype_class [v16+] for multi-app compatibility.
+
+### extend_doctype_class [v16+] — Conflicts
 
 ```python
-# myapp/extends.py
-import frappe
-from frappe import _
+# hooks.py
+extend_doctype_class = {
+    "Sales Invoice": ["myapp.extensions.si.SalesInvoiceMixin"]
+}
 
-class SalesOrderExtend:
-    """Extension class - only add new methods."""
-    
-    def custom_approval_check(self):
-        """New method with error handling."""
-        try:
-            if not self.custom_approver:
-                frappe.throw(_("Approver not set"))
-            
-            approver = frappe.get_doc("User", self.custom_approver)
-            if not approver.enabled:
-                frappe.throw(_("Approver is disabled"))
-                
-        except frappe.DoesNotExistError:
-            frappe.throw(_("Approver not found"))
+# ❌ CONFLICT: Two extensions define same method
+# App A: class Mixin: def custom_calc(self): ...
+# App B: class Mixin: def custom_calc(self): ...
+# Result: Last app's method wins silently
+
+# ✅ ALWAYS prefix method names with app name
+class SalesInvoiceMixin:
+    def myapp_custom_calc(self):
+        """Prefixed to avoid conflicts with other extensions."""
+        pass
 ```
 
 ---
 
-## extend_bootinfo Error Handling
-
-### Critical: Errors Break Page Load!
+## extend_bootinfo Errors
 
 ```python
-# ❌ WRONG - Unhandled error breaks desk entirely!
+# ❌ BREAKS LOGIN — unhandled error prevents desk from loading
 def extend_boot(bootinfo):
-    settings = frappe.get_single("My Settings")  # What if it doesn't exist?
-    bootinfo.my_config = settings.config
+    settings = frappe.get_single("My Settings")  # DoesNotExistError!
+    bootinfo.config = settings.config
 
-# ✅ CORRECT - Always handle errors
+# ✅ ALWAYS wrap in try/except with safe defaults
 def extend_boot(bootinfo):
-    """Extend bootinfo with error handling."""
+    bootinfo.myapp_config = {}
     try:
         if frappe.db.exists("My Settings", "My Settings"):
             settings = frappe.get_single("My Settings")
-            bootinfo.my_config = settings.config or {}
-        else:
-            bootinfo.my_config = {}
-            
+            bootinfo.myapp_config = {"feature": settings.feature or False}
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Bootinfo Extension Error"
-        )
-        # Safe fallback
-        bootinfo.my_config = {}
+        frappe.log_error(frappe.get_traceback(), "Bootinfo Error")
 ```
+
+---
+
+## Fixtures Not Loading
+
+```python
+# ❌ WRONG — dt key misspelled
+fixtures = [{"doctype": "Custom Field", "filters": [...]}]  # "doctype" not "dt"!
+
+# ✅ CORRECT — use "dt" key
+fixtures = [{"dt": "Custom Field", "filters": [["module", "=", "My App"]]}]
+
+# ❌ PROBLEM: DocType doesn't exist on target site
+fixtures = [{"dt": "My Custom DocType"}]  # If not created yet → install fails
+
+# ✅ FIX: Ensure DocType is created before fixtures are imported
+# Order: DocType JSON → fixtures JSON (install order matters)
+```
+
+**Export command**: `bench --site mysite export-fixtures`
+**Import**: Automatic during `bench --site mysite install-app myapp`
 
 ---
 
 ## Critical Rules
 
-### ✅ ALWAYS
+### ALWAYS
+1. Restart bench after changing hooks.py
+2. Use try/except in scheduler tasks — no user sees errors
+3. Call `frappe.db.commit()` in scheduler — no auto-commit
+4. Return safe fallbacks in permission hooks — NEVER throw
+5. Call `super()` in override classes — re-raise ValidationError
+6. Wrap `extend_bootinfo` in try/except — errors break login
+7. Wrap wildcard `"*"` doc_events in try/except — errors break ALL saves
+8. Prefix extend_doctype_class [v16+] methods with app name
 
-1. **Use try/except in scheduler tasks** - No user feedback otherwise
-2. **Call frappe.db.commit() in scheduler** - Changes aren't auto-saved
-3. **Return safe fallbacks in permission hooks** - Never throw
-4. **Call super() in override classes** - Preserve parent behavior
-5. **Log errors with context** - Include document name, operation
-6. **Wrap extend_bootinfo in try/except** - Errors break page load
-
-### ❌ NEVER
-
-1. **Don't throw in permission_query_conditions** - Breaks list views
-2. **Don't throw in has_permission** - Breaks document access
-3. **Don't assume single handler** - Multiple apps can register
-4. **Don't commit in doc_events** - Framework handles transactions
-5. **Don't ignore scheduler errors** - They fail silently
+### NEVER
+1. Throw in `permission_query_conditions` — breaks list views
+2. Throw in `has_permission` — breaks document access
+3. Commit in doc_events — breaks transaction management
+4. Import from hooks.py in event handlers — causes circular imports
+5. Assume single handler — multiple apps register doc_events
+6. Use string formatting in permission SQL — SQL injection risk
+7. Ignore scheduler errors — they fail completely silently
 
 ---
 
-## Quick Reference: Error Handling by Hook
+## Quick Reference: Error Handling by Hook Type
 
-| Hook Type | Can Throw? | Commit? | Key Pattern |
-|-----------|:----------:|:-------:|-------------|
-| doc_events (validate) | ✅ YES | ❌ NO | Collect errors, throw once |
-| doc_events (on_update) | ⚠️ Careful | ❌ NO | Isolate non-critical ops |
-| scheduler_events | ❌ Pointless | ✅ YES | Try/except + log_error |
-| permission_query_conditions | ❌ NEVER | ❌ NO | Return "" on error |
-| has_permission | ❌ NEVER | ❌ NO | Return None on error |
-| extend_bootinfo | ❌ NEVER | ❌ NO | Try/except + fallback |
-| override class | ✅ YES | ❌ NO | super() + re-raise |
+| Hook Type | Can Throw? | Commit? | Error Strategy |
+|-----------|:----------:|:-------:|----------------|
+| doc_events (validate) | YES | NEVER | Collect errors, throw once |
+| doc_events (on_update+) | Careful | NEVER | Isolate non-critical ops |
+| scheduler_events | Pointless | ALWAYS | try/except + log_error |
+| permission_query_conditions | NEVER | NEVER | Return "" or owner filter |
+| has_permission | NEVER | NEVER | Return None on error |
+| extend_bootinfo | NEVER | NEVER | try/except + safe defaults |
+| override_doctype_class | YES | NEVER | super() + re-raise |
+| extend_doctype_class [v16+] | YES | NEVER | Prefix methods, avoid conflicts |
+| fixtures | N/A | N/A | Verify dt key and DocType existence |
+| app_include_js/css | N/A | N/A | Check assets/ prefix, run bench build |
 
 ---
 
@@ -464,15 +442,16 @@ def extend_boot(bootinfo):
 
 | File | Contents |
 |------|----------|
-| `references/patterns.md` | Complete error handling patterns |
-| `references/examples.md` | Full working examples |
-| `references/anti-patterns.md` | Common mistakes to avoid |
+| `references/patterns.md` | Complete error handling patterns by hook type |
+| `references/examples.md` | Full working examples with error handling |
+| `references/anti-patterns.md` | Common mistakes with wrong/correct pairs |
 
 ---
 
 ## See Also
 
-- `frappe-syntax-hooks` - Hooks syntax
-- `frappe-impl-hooks` - Implementation workflows
-- `frappe-errors-controllers` - Controller error handling
-- `frappe-errors-serverscripts` - Server Script error handling
+- `frappe-syntax-hooks` — Hook syntax and dict structures
+- `frappe-impl-hooks` — Implementation workflows
+- `frappe-errors-controllers` — Controller error handling
+- `frappe-errors-database` — Database error handling
+- `frappe-errors-serverscripts` — Server Script error handling

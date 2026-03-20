@@ -1,40 +1,86 @@
-# Anti-Patterns - Hooks Error Handling
+# Anti-Patterns — Hooks Error Handling
 
-Common mistakes to avoid when handling errors in Frappe/ERPNext hooks.py configurations.
+Common mistakes to avoid when handling errors in Frappe/ERPNext hooks.py.
 
 ---
 
-## 1. Throwing Errors in permission_query_conditions
+## 1. Typo in Hook Dotted Path
 
-### ❌ WRONG
+### Problem
+```python
+# hooks.py — function name doesn't match
+doc_events = {
+    "Sales Invoice": {
+        "validate": "myapp.events.sales.validate_invoice"
+    }
+}
+# But actual function is named validate_si()
+```
 
+### Fix
+```python
+# ALWAYS verify: module path + function name match the actual file
+# myapp/events/sales.py must contain:
+def validate_invoice(doc, method=None):
+    pass
+```
+
+**Why**: Mismatched dotted paths cause silent failures or ImportError on bench restart.
+
+---
+
+## 2. Wrong Dict Structure for Hook Type
+
+### Problem
+```python
+# doc_events needs nested dict — string value is WRONG
+doc_events = {
+    "Sales Invoice": "myapp.events.validate"
+}
+
+# scheduler_events daily needs list — string is WRONG
+scheduler_events = {
+    "daily": "myapp.tasks.daily_sync"
+}
+```
+
+### Fix
+```python
+doc_events = {
+    "Sales Invoice": {
+        "validate": "myapp.events.sales.validate"
+    }
+}
+
+scheduler_events = {
+    "daily": ["myapp.tasks.daily_sync"]
+}
+```
+
+**Why**: Framework expects specific data structures. Wrong structure causes silent failure.
+
+---
+
+## 3. Throwing in permission_query_conditions
+
+### Problem
 ```python
 def query_conditions(user):
     if not user:
-        frappe.throw("User is required")  # BREAKS LIST VIEW!
-    
-    if "Sales User" not in frappe.get_roles(user):
-        frappe.throw("Access denied")  # BREAKS LIST VIEW!
-    
-    return f"owner = '{user}'"
+        frappe.throw("User required")  # BREAKS LIST VIEW!
+    return f"owner = '{user}'"  # Also: SQL injection!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 def query_conditions(user):
     try:
-        if not user:
-            user = frappe.session.user
-        
-        if "Sales Manager" in frappe.get_roles(user):
-            return ""  # Full access
-        
+        user = user or frappe.session.user
+        if "System Manager" in frappe.get_roles(user):
+            return ""
         return f"owner = {frappe.db.escape(user)}"
-        
     except Exception:
         frappe.log_error(frappe.get_traceback(), "Query Conditions Error")
-        # Safe fallback
         return f"owner = {frappe.db.escape(frappe.session.user)}"
 ```
 
@@ -42,110 +88,87 @@ def query_conditions(user):
 
 ---
 
-## 2. Throwing Errors in has_permission
+## 4. Throwing in has_permission
 
-### ❌ WRONG
-
+### Problem
 ```python
 def has_permission(doc, user=None, permission_type=None):
     if doc.status == "Locked":
-        frappe.throw("Document is locked")  # BREAKS DOCUMENT ACCESS!
-    
-    if not user:
-        frappe.throw("User required")  # DON'T DO THIS!
+        frappe.throw("Document is locked")  # BREAKS DOCUMENT ACCESS
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 def has_permission(doc, user=None, permission_type=None):
     try:
-        user = user or frappe.session.user
-        
         if doc.status == "Locked" and permission_type == "write":
-            return False  # Deny access silently
-        
-        return None  # Defer to default
-        
+            return False
+        return None
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "Has Permission Error")
-        return None  # Safe fallback
+        return None
 ```
 
-**Why**: Throwing in has_permission breaks document access.
+**Why**: Throwing in has_permission breaks document access entirely.
 
 ---
 
-## 3. Missing frappe.db.commit() in Scheduler
+## 5. Missing frappe.db.commit() in Scheduler
 
-### ❌ WRONG
-
+### Problem
 ```python
 def daily_task():
-    records = frappe.get_all("Item", limit=100)
-    for record in records:
-        frappe.db.set_value("Item", record.name, "synced", 1)
-    
-    # Missing commit - ALL CHANGES LOST!
+    for item in frappe.get_all("Item", limit=100):
+        frappe.db.set_value("Item", item.name, "synced", 1)
+    # ALL CHANGES LOST — no commit!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 def daily_task():
-    records = frappe.get_all("Item", limit=100)
-    for record in records:
-        frappe.db.set_value("Item", record.name, "synced", 1)
-    
-    frappe.db.commit()  # REQUIRED!
+    for item in frappe.get_all("Item", limit=100):
+        frappe.db.set_value("Item", item.name, "synced", 1)
+    frappe.db.commit()  # REQUIRED
 ```
 
-**Why**: Scheduler tasks don't auto-commit. Without explicit commit, changes are lost.
+**Why**: Scheduler tasks have no auto-commit. Without explicit commit, all changes are lost.
 
 ---
 
-## 4. Not Logging Errors in Scheduler
+## 6. Silent Error Swallowing in Scheduler
 
-### ❌ WRONG
-
+### Problem
 ```python
 def daily_sync():
     try:
         sync_records()
     except Exception:
-        pass  # Silent failure - impossible to debug!
+        pass  # Silent death — impossible to debug
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 def daily_sync():
     try:
         sync_records()
+        frappe.db.commit()
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Daily Sync Error"
-        )
+        frappe.log_error(frappe.get_traceback(), "Daily Sync Error")
 ```
 
-**Why**: Scheduler has no user - logging is your ONLY debugging tool.
+**Why**: Scheduler has no user feedback. frappe.log_error() is your ONLY debugging tool.
 
 ---
 
-## 5. Not Calling super() in Override Class
+## 7. Not Calling super() in Override Class
 
-### ❌ WRONG
-
+### Problem
 ```python
 class CustomSalesInvoice(SalesInvoice):
     def validate(self):
-        # Missing super()! All parent validation skipped!
-        self.custom_validation()
+        self.custom_validation()  # Parent validation SKIPPED!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 class CustomSalesInvoice(SalesInvoice):
     def validate(self):
@@ -153,225 +176,154 @@ class CustomSalesInvoice(SalesInvoice):
         self.custom_validation()
 ```
 
-**Why**: Skipping super() bypasses all parent class logic.
+**Why**: Skipping super() bypasses all parent validation, permissions, and business logic.
 
 ---
 
-## 6. Unprotected extend_bootinfo
+## 8. Swallowing Parent Errors in Override
 
-### ❌ WRONG
-
-```python
-def extend_boot(bootinfo):
-    # If this fails, ENTIRE DESK BREAKS!
-    settings = frappe.get_single("My Settings")
-    bootinfo.my_config = settings.config
-```
-
-### ✅ CORRECT
-
-```python
-def extend_boot(bootinfo):
-    try:
-        if frappe.db.exists("My Settings", "My Settings"):
-            settings = frappe.get_single("My Settings")
-            bootinfo.my_config = settings.config or {}
-        else:
-            bootinfo.my_config = {}
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Bootinfo Error")
-        bootinfo.my_config = {}  # Safe fallback
-```
-
-**Why**: Errors in extend_bootinfo break the entire desk/page load.
-
----
-
-## 7. Committing in doc_events
-
-### ❌ WRONG
-
-```python
-def on_update(doc, method=None):
-    frappe.db.set_value("Counter", "main", "count", 100)
-    frappe.db.commit()  # BREAKS TRANSACTION!
-```
-
-### ✅ CORRECT
-
-```python
-def on_update(doc, method=None):
-    frappe.db.set_value("Counter", "main", "count", 100)
-    # No commit - Frappe handles it automatically
-```
-
-**Why**: Manual commits in doc_events break the transaction and can cause partial saves.
-
----
-
-## 8. Not Isolating Non-Critical Operations
-
-### ❌ WRONG
-
-```python
-def on_submit(doc, method=None):
-    # If email fails, external sync never runs!
-    send_notification_email(doc)
-    sync_to_external_system(doc)
-    update_dashboard_stats(doc)
-```
-
-### ✅ CORRECT
-
-```python
-def on_submit(doc, method=None):
-    # Isolate each operation
-    try:
-        send_notification_email(doc)
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Email Error")
-    
-    try:
-        sync_to_external_system(doc)
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Sync Error")
-    
-    try:
-        update_dashboard_stats(doc)
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "Stats Error")
-```
-
-**Why**: Independent operations should not block each other.
-
----
-
-## 9. Breaking Other Apps in Wildcard Handler
-
-### ❌ WRONG
-
-```python
-# hooks.py
-doc_events = {
-    "*": {
-        "on_update": "myapp.audit.log_all"
-    }
-}
-
-# audit.py
-def log_all(doc, method=None):
-    # Error here breaks ALL saves in the system!
-    frappe.get_doc({
-        "doctype": "Audit Log",
-        "doc": doc.name
-    }).insert()
-```
-
-### ✅ CORRECT
-
-```python
-def log_all(doc, method=None):
-    # NEVER break other apps' saves
-    try:
-        # Skip audit doctypes
-        if doc.doctype in ["Audit Log", "Error Log"]:
-            return
-        
-        frappe.get_doc({
-            "doctype": "Audit Log",
-            "doc": doc.name
-        }).insert(ignore_permissions=True)
-        
-    except Exception:
-        # Log but never propagate
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"Audit log error: {doc.doctype}/{doc.name}"
-        )
-```
-
-**Why**: Wildcard handlers run on ALL documents - errors affect the entire system.
-
----
-
-## 10. No Limit in Scheduler Queries
-
-### ❌ WRONG
-
-```python
-def daily_sync():
-    # Could return millions of records!
-    records = frappe.get_all("Item")
-    for record in records:
-        process(record)
-```
-
-### ✅ CORRECT
-
-```python
-def daily_sync():
-    # Always limit!
-    records = frappe.get_all("Item", limit=1000)
-    for record in records:
-        process(record)
-    
-    frappe.db.commit()
-```
-
-**Why**: Unbounded queries can cause memory issues and timeouts.
-
----
-
-## 11. Swallowing Parent Errors in Override
-
-### ❌ WRONG
-
+### Problem
 ```python
 class CustomDoc(OriginalDoc):
     def validate(self):
         try:
             super().validate()
         except Exception:
-            pass  # Swallowed parent validation!
-        
-        self.custom_check()
+            pass  # Parent validation errors HIDDEN from user!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
 class CustomDoc(OriginalDoc):
     def validate(self):
         try:
             super().validate()
         except frappe.ValidationError:
-            raise  # Re-raise validation errors
-        except Exception as e:
-            frappe.log_error(frappe.get_traceback(), "Parent Error")
-            raise  # Re-raise unexpected errors too
-        
-        self.custom_check()
+            raise  # ALWAYS re-raise validation errors
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "Parent error")
+            raise
 ```
 
-**Why**: Parent validation errors should propagate to the user.
+**Why**: Parent validation errors MUST reach the user. Swallowing them causes data corruption.
 
 ---
 
-## 12. SQL Injection in Permission Query
+## 9. Unprotected extend_bootinfo
 
-### ❌ WRONG
-
+### Problem
 ```python
-def query_conditions(user):
-    # SQL INJECTION VULNERABILITY!
-    return f"owner = '{user}'"
+def extend_boot(bootinfo):
+    settings = frappe.get_single("My Settings")  # DoesNotExistError!
+    bootinfo.config = settings.config
 ```
 
-### ✅ CORRECT
+### Fix
+```python
+def extend_boot(bootinfo):
+    bootinfo.config = {}
+    try:
+        if frappe.db.exists("My Settings", "My Settings"):
+            settings = frappe.get_single("My Settings")
+            bootinfo.config = settings.config or {}
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Bootinfo Error")
+```
 
+**Why**: Errors in extend_bootinfo break the entire desk/login page.
+
+---
+
+## 10. Committing in doc_events
+
+### Problem
+```python
+def on_update(doc, method=None):
+    frappe.db.set_value("Counter", "main", "count", 100)
+    frappe.db.commit()  # BREAKS TRANSACTION
+```
+
+### Fix
+```python
+def on_update(doc, method=None):
+    frappe.db.set_value("Counter", "main", "count", 100)
+    # Framework handles commit automatically
+```
+
+**Why**: Manual commits in doc_events break transaction management and cause partial saves.
+
+---
+
+## 11. Not Isolating Non-Critical Operations
+
+### Problem
+```python
+def on_submit(doc, method=None):
+    send_notification_email(doc)  # If this fails...
+    sync_to_external_system(doc)  # ...this never runs!
+    update_dashboard(doc)
+```
+
+### Fix
+```python
+def on_submit(doc, method=None):
+    try:
+        send_notification_email(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Email Error")
+
+    try:
+        sync_to_external_system(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Sync Error")
+
+    try:
+        update_dashboard(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Dashboard Error")
+```
+
+**Why**: Independent operations MUST NOT block each other.
+
+---
+
+## 12. Breaking Other Apps in Wildcard Handler
+
+### Problem
+```python
+doc_events = {"*": {"on_update": "myapp.audit.log_all"}}
+
+def log_all(doc, method=None):
+    frappe.get_doc({"doctype": "Audit Log", "doc": doc.name}).insert()
+    # Error here breaks ALL saves system-wide!
+```
+
+### Fix
+```python
+def log_all(doc, method=None):
+    try:
+        if doc.doctype in ["Audit Log", "Error Log"]:
+            return
+        frappe.get_doc({"doctype": "Audit Log", "doc": doc.name}).insert(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"Audit: {doc.doctype}/{doc.name}")
+```
+
+**Why**: Wildcard handlers run on ALL documents. Unhandled errors break the entire system.
+
+---
+
+## 13. SQL Injection in Permission Query
+
+### Problem
 ```python
 def query_conditions(user):
-    # Escape user input
+    return f"owner = '{user}'"  # SQL INJECTION!
+```
+
+### Fix
+```python
+def query_conditions(user):
     return f"owner = {frappe.db.escape(user)}"
 ```
 
@@ -379,81 +331,88 @@ def query_conditions(user):
 
 ---
 
-## 13. Using frappe.throw() to Show Warnings
+## 14. No Limit in Scheduler Queries
 
-### ❌ WRONG
-
+### Problem
 ```python
-def validate(doc, method=None):
-    if doc.discount > 20:
-        frappe.throw("High discount applied")  # Blocks save!
+def daily_sync():
+    records = frappe.get_all("Item")  # Could return millions!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def validate(doc, method=None):
-    if doc.discount > 20:
-        frappe.msgprint(
-            _("High discount applied - please verify"),
-            indicator="orange"
-        )
+def daily_sync():
+    records = frappe.get_all("Item", limit=1000)
 ```
 
-**Why**: Use `frappe.throw()` only for blocking errors, `frappe.msgprint()` for warnings.
+**Why**: Unbounded queries cause memory exhaustion and timeouts in scheduler tasks.
 
 ---
 
-## 14. Not Handling Multiple Handlers
+## 15. Circular Import from hooks.py
 
-### ❌ WRONG
-
+### Problem
 ```python
-# Assumes only this handler runs
-def validate(doc, method=None):
-    doc.custom_calculated = calculate_value()
-    # Other apps may have handlers that run after!
+# myapp/events/sales.py
+from myapp.hooks import doc_events  # CIRCULAR IMPORT!
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def validate(doc, method=None):
-    # Be aware of handler chain
-    doc.custom_calculated = calculate_value()
-    
-    # If you need to ensure values persist, use flags
-    doc.flags.custom_calculated_by_myapp = True
+# NEVER import from hooks.py in event handlers
+# hooks.py is read by the framework, not by your code
+# Move shared config to myapp/constants.py instead
 ```
 
-**Why**: Multiple apps can register handlers - don't assume you're alone.
+**Why**: hooks.py is a configuration file read by the framework. Importing from it creates circular dependencies.
 
 ---
 
-## 15. Heavy Operations in Sync Handler
+## 16. Wrong Fixtures dt Key
 
-### ❌ WRONG
-
+### Problem
 ```python
-def on_update(doc, method=None):
-    # Blocks the UI while running!
-    sync_all_items()  # Takes 30 seconds
-    generate_reports()  # Takes 20 seconds
+fixtures = [
+    {"doctype": "Custom Field", "filters": [...]}  # "doctype" is WRONG
+]
 ```
 
-### ✅ CORRECT
-
+### Fix
 ```python
-def on_update(doc, method=None):
-    # Queue heavy operations
-    frappe.enqueue(
-        "myapp.tasks.sync_all_items",
-        queue="long",
-        job_id=f"sync_{doc.name}"
-    )
+fixtures = [
+    {"dt": "Custom Field", "filters": [["module", "=", "My App"]]}
+]
 ```
 
-**Why**: Heavy operations in sync handlers make the UI unresponsive.
+**Why**: Fixtures use the `dt` key, not `doctype`. Wrong key causes silent failure during install.
+
+---
+
+## 17. extend_doctype_class [v16+] Method Name Collision
+
+### Problem
+```python
+# App A extension:
+class InvoiceMixin:
+    def calculate_tax(self): ...
+
+# App B extension:
+class InvoiceMixin:
+    def calculate_tax(self): ...  # SILENTLY OVERRIDES App A!
+```
+
+### Fix
+```python
+# App A:
+class InvoiceMixin:
+    def appa_calculate_tax(self): ...
+
+# App B:
+class InvoiceMixin:
+    def appb_calculate_tax(self): ...
+```
+
+**Why**: With extend_doctype_class, the last extension's method wins silently. Prefix to avoid collisions.
 
 ---
 
@@ -461,15 +420,19 @@ def on_update(doc, method=None):
 
 Before deploying hooks:
 
+- [ ] Dotted paths match actual module + function names
+- [ ] Dict structure correct for each hook type
 - [ ] No `frappe.throw()` in permission hooks
 - [ ] `frappe.db.commit()` in scheduler tasks
 - [ ] `frappe.log_error()` for all caught exceptions
-- [ ] `super()` called in override classes
+- [ ] `super()` called in override classes with re-raise
 - [ ] `try/except` wrapper in extend_bootinfo
 - [ ] No `frappe.db.commit()` in doc_events
-- [ ] Non-critical operations isolated
-- [ ] Wildcard handlers never break saves
+- [ ] Non-critical operations isolated in try/except
+- [ ] Wildcard handlers wrapped in try/except
 - [ ] Queries have limits in scheduler
-- [ ] User input escaped in SQL
-- [ ] Warnings use `msgprint()`, not `throw()`
-- [ ] Heavy operations enqueued
+- [ ] User input escaped in SQL (permission hooks)
+- [ ] No circular imports from hooks.py
+- [ ] Fixtures use `dt` key (not `doctype`)
+- [ ] extend_doctype_class methods prefixed with app name
+- [ ] bench restarted after hooks.py changes

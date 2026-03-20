@@ -1,18 +1,24 @@
 # Webhooks Reference
 
-Webhooks are "user-defined HTTP callbacks" that trigger on document events.
+> Complete reference for Frappe webhook configuration, security, and handling.
 
 ---
 
-## Webhook Configuration (UI)
+## Overview
 
-1. Webhook List → New
+Webhooks are user-defined HTTP callbacks that trigger on document events, sending HTTP requests to configured URLs.
+
+---
+
+## Configuration (via UI)
+
+1. Webhook DocType > New
 2. Select DocType (e.g., "Sales Order")
-3. Select Event
+3. Select Doc Event
 4. Enter Request URL
-5. Optional: Add HTTP Headers
-6. Optional: Set Conditions
-7. Optional: Webhook Secret for HMAC
+5. Optional: Add HTTP Headers (API keys, auth tokens)
+6. Optional: Set Conditions (Jinja2 syntax)
+7. Optional: Set Webhook Secret for HMAC verification
 
 ---
 
@@ -20,13 +26,13 @@ Webhooks are "user-defined HTTP callbacks" that trigger on document events.
 
 | Event | Trigger Moment |
 |-------|----------------|
-| `after_insert` | After new document created |
-| `on_update` | After every save |
-| `on_submit` | After submit (docstatus: 1) |
-| `on_cancel` | After cancel (docstatus: 2) |
-| `on_trash` | Before delete |
-| `on_update_after_submit` | After amendment |
-| `on_change` | On every change |
+| `after_insert` | After new document is created and saved |
+| `on_update` | After every save operation |
+| `on_submit` | After document submit (docstatus: 0 > 1) |
+| `on_cancel` | After document cancel (docstatus: 1 > 2) |
+| `on_trash` | Before document deletion |
+| `on_update_after_submit` | After amendment to submitted doc |
+| `on_change` | On every change (catch-all) |
 
 ---
 
@@ -46,66 +52,16 @@ Content-Type: application/json
         "customer": "Customer A",
         "grand_total": 1500.00,
         "status": "Draft",
-        ...all fields...
+        ...all document fields...
     }
 }
 ```
 
 ---
 
-## Webhook Security
-
-### HMAC Signature Verification
-
-If "Webhook Secret" is set, Frappe adds a signature header:
-
-```
-X-Frappe-Webhook-Signature: base64_encoded_hmac_sha256_of_payload
-```
-
-### Python Verification
-
-```python
-import hmac
-import hashlib
-import base64
-
-def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
-    """Verify Frappe webhook HMAC signature."""
-    expected = base64.b64encode(
-        hmac.new(
-            secret.encode(),
-            payload,
-            hashlib.sha256
-        ).digest()
-    ).decode()
-    return hmac.compare_digest(expected, signature)
-
-# Flask example
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
-WEBHOOK_SECRET = 'your_secret_here'
-
-@app.route('/webhook/sales-order', methods=['POST'])
-def handle_webhook():
-    signature = request.headers.get('X-Frappe-Webhook-Signature')
-    
-    if signature:
-        if not verify_webhook_signature(request.data, signature, WEBHOOK_SECRET):
-            return jsonify({'error': 'Invalid signature'}), 401
-    
-    data = request.json
-    process_webhook(data)
-    
-    return jsonify({'status': 'received'}), 200
-```
-
----
-
 ## Webhook Conditions
 
-Conditions use Jinja2 syntax to determine if webhook should trigger:
+Conditions use Jinja2 syntax. Webhook only triggers when condition evaluates to `True`:
 
 ```jinja2
 {# Only for large orders #}
@@ -123,22 +79,22 @@ Conditions use Jinja2 syntax to determine if webhook should trigger:
 
 ---
 
-## Request Data Formats
+## Data Format Options
 
-### Form-based (fields in table)
+### Form-Based
 
-Configure fields individually in Webhook Data:
+Configure fields individually in Webhook Data table:
 
 | Fieldname | Key |
 |-----------|-----|
 | `customer` | `customer` |
 | `grand_total` | `amount` |
 
-Output: `customer=Customer%20A&amount=1500`
+Sent as form-encoded: `customer=Customer%20A&amount=1500`
 
-### JSON-based (with Jinja)
+### JSON-Based (with Jinja)
 
-Select "JSON" as Request Structure and write template:
+Select "JSON" as Request Structure and write a Jinja template:
 
 ```json
 {
@@ -158,20 +114,37 @@ Select "JSON" as Request Structure and write template:
 
 ---
 
-## Webhook Handler Example (Complete)
+## Webhook Security — HMAC Signature
+
+When "Webhook Secret" is configured, Frappe adds a signature header:
+
+```
+X-Frappe-Webhook-Signature: base64_encoded_hmac_sha256_of_payload
+```
+
+### Python Verification
 
 ```python
-from flask import Flask, request, jsonify
 import hmac
 import hashlib
 import base64
-import logging
+
+def verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), payload, hashlib.sha256).digest()
+    ).decode()
+    return hmac.compare_digest(expected, signature)
+```
+
+### Complete Handler Example (Flask)
+
+```python
+from flask import Flask, request, jsonify
+import hmac, hashlib, base64, logging, os
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-WEBHOOK_SECRET = 'your_secret_here'
+WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET')
 
 def verify_signature(payload: bytes, signature: str) -> bool:
     expected = base64.b64encode(
@@ -186,7 +159,7 @@ def handle_order_webhook():
     if signature and not verify_signature(request.data, signature):
         logger.warning('Invalid webhook signature')
         return jsonify({'error': 'Invalid signature'}), 401
-    
+
     # 2. Parse data
     try:
         data = request.json
@@ -194,67 +167,49 @@ def handle_order_webhook():
         docname = data.get('name')
         doc_data = data.get('data', {})
     except Exception as e:
-        logger.error(f'Failed to parse webhook: {e}')
+        logger.error(f'Failed to parse: {e}')
         return jsonify({'error': 'Invalid payload'}), 400
-    
-    # 3. Log receipt
-    logger.info(f'Received webhook: {doctype}/{docname}')
-    
-    # 4. Process (fast - queue long operations)
+
+    # 3. Process (keep fast — queue long operations)
+    logger.info(f'Webhook: {doctype}/{docname}')
     try:
         if doctype == 'Sales Order':
             process_sales_order(docname, doc_data)
     except Exception as e:
-        logger.error(f'Webhook processing failed: {e}')
-        # Return 200 anyway to prevent retries
-    
-    # 5. Return quickly
+        logger.error(f'Processing failed: {e}')
+        # Return 200 anyway to prevent endless retries
+
+    # 4. Return quickly
     return jsonify({'status': 'received'}), 200
-
-def process_sales_order(name, data):
-    """Process Sales Order webhook."""
-    status = data.get('status')
-    grand_total = data.get('grand_total', 0)
-    
-    if status == 'To Deliver and Bill' and grand_total > 10000:
-        # Notify sales team for large orders
-        send_notification(name, grand_total)
-
-if __name__ == '__main__':
-    app.run(port=5000)
 ```
 
 ---
 
 ## Best Practices
 
-```
-✅ Implement HMAC signature verification
-✅ Return quickly (< 30 sec) - queue long operations
-✅ Implement retry logic for failed webhooks
-✅ Log webhook payloads for debugging
-✅ Return 200 even on processing errors (prevent endless retries)
-✅ Use idempotent operations (same webhook may arrive multiple times)
-
-❌ NEVER put sensitive data in webhook payloads without encryption
-❌ NEVER rely on webhook delivery order
-❌ NEVER do synchronous long operations in webhook handler
-```
+1. **ALWAYS** set a Webhook Secret and verify HMAC signatures
+2. **ALWAYS** return quickly (< 30 seconds) — queue long operations
+3. **ALWAYS** return HTTP 200 even on processing errors (prevents endless retries)
+4. **ALWAYS** implement idempotent operations (same webhook may arrive multiple times)
+5. **ALWAYS** log webhook payloads for debugging
+6. **NEVER** put sensitive data in webhook payloads without encryption
+7. **NEVER** rely on webhook delivery order
+8. **NEVER** perform synchronous heavy operations in webhook handlers
 
 ---
 
 ## Webhook Debugging
 
-### In ERPNext
+### In Frappe
 
-1. Webhook Logs: see all sent webhooks
-2. Error Logs: see failed requests
-3. Request Log: full request/response details
+1. **Webhook Request Log**: Shows all sent webhooks with request/response details
+2. **Error Log**: Shows failed webhook requests
+3. Enable/disable individual webhooks without deleting configuration
 
-### Testing
+### Testing Locally
 
 ```bash
-# Test webhook endpoint locally with ngrok
+# Expose local server with ngrok
 ngrok http 5000
 
 # Simulate webhook

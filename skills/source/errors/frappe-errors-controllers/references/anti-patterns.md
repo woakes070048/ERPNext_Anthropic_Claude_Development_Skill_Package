@@ -1,530 +1,329 @@
-# Anti-Patterns - Controller Error Handling
+# Controller Anti-Patterns — Error Prevention
 
-Common mistakes to avoid when handling errors in Frappe/ERPNext Document Controllers.
-
----
-
-## 1. Assuming on_update Changes Are Saved
-
-### ❌ WRONG
-
-```python
-def on_update(self):
-    """This change is LOST - document already saved!"""
-    self.status = "Processed"
-    self.processed_date = frappe.utils.now()
-```
-
-### ✅ CORRECT
-
-```python
-def on_update(self):
-    """Use db_set for changes after save."""
-    frappe.db.set_value(
-        self.doctype, self.name,
-        {"status": "Processed", "processed_date": frappe.utils.now()}
-    )
-    # Or use self.db_set()
-    self.db_set("status", "Processed")
-```
-
-**Why**: After `on_update`, the document is already written to database. Changes to `self` are not saved.
+Each anti-pattern shows the mistake, why it fails, and the correct approach.
 
 ---
 
-## 2. Calling frappe.db.commit() in Controller
-
-### ❌ WRONG
+## 1. Calling self.save() in Hooks
 
 ```python
+# ❌ WRONG — Infinite recursion
 def validate(self):
-    self.calculate_totals()
-    frappe.db.commit()  # BREAKS TRANSACTION!
+    self.calculate()
+    self.save()  # Triggers validate again
 
 def on_update(self):
-    self.update_linked_docs()
-    frappe.db.commit()  # DON'T DO THIS
-```
+    self.status = "Done"
+    self.save()  # Triggers on_update again
 
-### ✅ CORRECT
-
-```python
+# ✅ CORRECT
 def validate(self):
-    self.calculate_totals()
-    # No commit - framework handles it
+    self.calculate()
+    # No save — framework handles it
 
 def on_update(self):
-    self.update_linked_docs()
-    # No commit - framework handles it
+    self.db_set("status", "Done")  # Direct DB, no trigger
 ```
-
-**Why**: Frappe wraps requests in transactions. Manual commits can cause partial saves and break rollback.
+**Why:** `save()` triggers the same hook, causing infinite recursion.
 
 ---
 
-## 3. Not Calling super() in Override
-
-### ❌ WRONG
+## 2. Missing super() in Overrides
 
 ```python
-class CustomSalesInvoice(SalesInvoice):
+# ❌ WRONG — All parent logic bypassed
+class CustomInvoice(SalesInvoice):
     def validate(self):
-        # Missing super()! Parent validation skipped!
-        self.custom_validation()
-```
+        self.my_check()  # ERPNext validations skipped!
 
-### ✅ CORRECT
-
-```python
-class CustomSalesInvoice(SalesInvoice):
+# ✅ CORRECT
+class CustomInvoice(SalesInvoice):
     def validate(self):
-        super().validate()  # ALWAYS call parent
-        self.custom_validation()
+        super().validate()  # Run parent first
+        self.my_check()
 ```
-
-**Why**: Skipping `super()` bypasses all parent class logic including critical validations.
+**Why:** Without `super()`, critical framework and parent app validations are silently skipped.
 
 ---
 
-## 4. Swallowing Errors Silently
-
-### ❌ WRONG
+## 3. frappe.db.commit() in Controllers
 
 ```python
+# ❌ WRONG — Breaks transaction management
 def validate(self):
-    try:
-        self.critical_validation()
-    except Exception:
-        pass  # Error silently ignored!
-```
+    frappe.db.set_value("Counter", "main", "count", 1)
+    frappe.db.commit()  # Committed even if save fails later!
 
-### ✅ CORRECT
-
-```python
+# ✅ CORRECT
 def validate(self):
-    try:
-        self.critical_validation()
-    except frappe.ValidationError:
-        raise  # Re-raise validation errors
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Validation Error")
-        frappe.throw(_("Validation failed: {0}").format(str(e)))
+    frappe.db.set_value("Counter", "main", "count", 1)
+    # Framework commits everything together, or rolls back together
 ```
-
-**Why**: Silent errors make debugging impossible and can lead to data corruption.
+**Why:** Manual commits break Frappe's request-level transaction, causing partial saves.
 
 ---
 
-## 5. Throwing on First Error
-
-### ❌ WRONG
+## 4. Changes in on_update Without db_set()
 
 ```python
-def validate(self):
-    if not self.customer:
-        frappe.throw(_("Customer is required"))
-    
-    if not self.items:
-        frappe.throw(_("Items are required"))
-    
-    # User sees errors one at a time
+# ❌ WRONG — Changes lost
+def on_update(self):
+    self.sync_status = "Synced"  # NOT saved!
+
+# ✅ CORRECT
+def on_update(self):
+    self.db_set("sync_status", "Synced")
 ```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    errors = []
-    
-    if not self.customer:
-        errors.append(_("Customer is required"))
-    
-    if not self.items:
-        errors.append(_("Items are required"))
-    
-    if errors:
-        frappe.throw("<br>".join(errors))
-```
-
-**Why**: Users should see all validation errors at once, not one at a time.
+**Why:** After `on_update`, the document is already committed. Changes to `self` are not persisted.
 
 ---
 
-## 6. Not Handling None/Empty Values
-
-### ❌ WRONG
+## 5. Validation in on_submit (Too Late)
 
 ```python
-def validate(self):
-    # Crashes if customer doesn't exist!
-    credit_limit = frappe.get_doc("Customer", self.customer).credit_limit
-    
-    # Division by zero if total is 0
-    margin = self.profit / self.total * 100
-```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    from frappe.utils import flt
-    
-    # Check existence first
-    if self.customer and frappe.db.exists("Customer", self.customer):
-        credit_limit = frappe.db.get_value("Customer", self.customer, "credit_limit") or 0
-    else:
-        credit_limit = 0
-    
-    # Safe division
-    margin = flt(self.profit) / flt(self.total) * 100 if flt(self.total) else 0
-```
-
-**Why**: Always assume values can be None, empty, or zero.
-
----
-
-## 7. Critical Logic in on_submit Instead of before_submit
-
-### ❌ WRONG
-
-```python
+# ❌ WRONG — Document already submitted!
 def on_submit(self):
-    # If this fails, document is ALREADY submitted (docstatus=1)!
-    if not self.has_stock():
-        frappe.throw(_("Insufficient stock"))
-```
+    if self.grand_total > self.credit_limit:
+        frappe.throw("Credit limit exceeded")  # docstatus already 1!
 
-### ✅ CORRECT
-
-```python
+# ✅ CORRECT — Validate in before_submit
 def before_submit(self):
-    # Last chance to abort cleanly
-    if not self.has_stock():
-        frappe.throw(_("Insufficient stock"))
-
-def on_submit(self):
-    # Only non-blocking operations here
-    self.create_stock_entries()
+    if self.grand_total > self.credit_limit:
+        frappe.throw("Credit limit exceeded")  # Clean abort, stays Draft
 ```
-
-**Why**: In `on_submit`, the document is already submitted. Throwing creates an inconsistent state.
+**Why:** In `on_submit`, docstatus is already 1. Throwing creates an inconsistent state.
 
 ---
 
-## 8. Not Isolating Errors in on_update
-
-### ❌ WRONG
+## 6. Swallowing Errors Silently
 
 ```python
-def on_update(self):
-    # If email fails, CRM sync and notifications also don't run
-    self.send_confirmation_email()
-    self.sync_to_crm()
-    self.send_internal_notifications()
-```
-
-### ✅ CORRECT
-
-```python
-def on_update(self):
-    errors = []
-    
-    try:
-        self.send_confirmation_email()
-    except Exception:
-        errors.append("Email failed")
-        frappe.log_error(frappe.get_traceback(), "Email Error")
-    
-    try:
-        self.sync_to_crm()
-    except Exception:
-        errors.append("CRM sync failed")
-        frappe.log_error(frappe.get_traceback(), "CRM Error")
-    
-    try:
-        self.send_internal_notifications()
-    except Exception:
-        errors.append("Notifications failed")
-        frappe.log_error(frappe.get_traceback(), "Notification Error")
-    
-    if errors:
-        frappe.msgprint(
-            _("Document saved. Some operations failed: {0}").format(", ".join(errors)),
-            indicator="orange"
-        )
-```
-
-**Why**: Independent operations should not block each other.
-
----
-
-## 9. Exposing Technical Errors
-
-### ❌ WRONG
-
-```python
+# ❌ WRONG — Debugging impossible
 def validate(self):
     try:
-        result = external_api_call()
-    except Exception as e:
-        frappe.throw(str(e))  # Exposes stack trace!
-        # Or: frappe.throw(frappe.get_traceback())
-```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    try:
-        result = external_api_call()
-    except Timeout:
-        frappe.throw(_("External service timed out. Please try again."))
-    except ConnectionError:
-        frappe.throw(_("Could not connect to external service."))
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "External API Error")
-        frappe.throw(_("External service error. Please contact support."))
-```
-
-**Why**: Technical details confuse users and may expose sensitive information.
-
----
-
-## 10. Calling self.save() in Hooks
-
-### ❌ WRONG
-
-```python
-def on_update(self):
-    self.status = "Updated"
-    self.save()  # INFINITE LOOP!
-```
-
-### ✅ CORRECT
-
-```python
-def on_update(self):
-    # Use db_set instead
-    self.db_set("status", "Updated")
-    
-    # Or frappe.db.set_value
-    frappe.db.set_value(self.doctype, self.name, "status", "Updated")
-```
-
-**Why**: Calling `save()` triggers `on_update` again, creating infinite recursion.
-
----
-
-## 11. Not Using Translation Wrapper
-
-### ❌ WRONG
-
-```python
-def validate(self):
-    frappe.throw("Customer is required")
-    frappe.msgprint("Order saved successfully")
-```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    frappe.throw(_("Customer is required"))
-    frappe.msgprint(_("Order saved successfully"))
-```
-
-**Why**: Without `_()`, messages won't be translated for non-English users.
-
----
-
-## 12. Forgetting to Log Errors
-
-### ❌ WRONG
-
-```python
-def on_update(self):
-    try:
-        self.sync_external()
+        self.check_stock()
     except Exception:
-        pass  # No log - debugging impossible
-```
+        pass  # What went wrong? Nobody knows.
 
-### ✅ CORRECT
-
-```python
-def on_update(self):
-    try:
-        self.sync_external()
-    except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"External sync failed for {self.name}"
-        )
-```
-
-**Why**: Without logs, tracking down issues in production is nearly impossible.
-
----
-
-## 13. Broad Exception Handling Without Specificity
-
-### ❌ WRONG
-
-```python
+# ✅ CORRECT
 def validate(self):
     try:
-        # Many operations
-        self.check_customer()
-        self.validate_items()
-        self.calculate_totals()
-    except Exception:
-        frappe.throw(_("Validation failed"))
-```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    try:
-        self.check_customer()
-    except frappe.DoesNotExistError:
-        frappe.throw(_("Customer not found"))
-    
-    try:
-        self.validate_items()
+        self.check_stock()
     except frappe.ValidationError:
         raise  # Re-raise validation errors
-    
-    self.calculate_totals()  # Let errors propagate
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Stock Check Error")
+        frappe.throw(_("Stock check failed: {0}").format(str(e)))
 ```
-
-**Why**: Specific exception handling provides better error messages and debugging.
+**Why:** Silent error swallowing makes production debugging impossible.
 
 ---
 
-## 14. Not Checking Database Results
-
-### ❌ WRONG
+## 7. Not Checking Database Results
 
 ```python
+# ❌ WRONG — Crashes on missing record
 def validate(self):
-    # Assumes record exists
-    customer = frappe.get_doc("Customer", self.customer)
-    
-    # Assumes query returns results
+    customer = frappe.get_doc("Customer", self.customer)  # DoesNotExistError!
     prices = frappe.db.sql("SELECT price FROM tabPrices WHERE item=%s", self.item)
-    price = prices[0][0]  # IndexError if empty!
-```
+    self.price = prices[0][0]  # IndexError if empty!
 
-### ✅ CORRECT
-
-```python
+# ✅ CORRECT
 def validate(self):
     if not frappe.db.exists("Customer", self.customer):
         frappe.throw(_("Customer not found"))
     customer = frappe.get_doc("Customer", self.customer)
-    
+
     prices = frappe.db.sql("SELECT price FROM tabPrices WHERE item=%s", self.item)
-    price = prices[0][0] if prices else 0
+    self.price = prices[0][0] if prices else 0
 ```
-
-**Why**: Always verify data exists before accessing it.
+**Why:** ALWAYS verify data exists before accessing it.
 
 ---
 
-## 15. Heavy Operations in validate
-
-### ❌ WRONG
+## 8. Not Isolating Errors in on_update/on_cancel
 
 ```python
-def validate(self):
-    # Slow operations block save
-    self.sync_all_items_to_external_api()  # Takes 30 seconds!
-    self.generate_pdf_report()
-    self.send_emails_to_all_stakeholders()
-```
-
-### ✅ CORRECT
-
-```python
-def validate(self):
-    # Only validation logic here
-    self.validate_items()
-
+# ❌ WRONG — First failure stops all operations
 def on_update(self):
-    # Queue heavy operations
-    frappe.enqueue(
-        "myapp.tasks.sync_items",
-        doctype=self.doctype,
-        name=self.name,
-        queue="long"
-    )
-```
+    self.send_email()          # If this fails...
+    self.sync_to_crm()        # ...this never runs
+    self.update_dashboard()   # ...neither does this
 
-**Why**: Heavy operations in `validate` make the UI unresponsive and can timeout.
-
----
-
-## 16. Using frappe.throw() in on_cancel for Cleanup
-
-### ❌ WRONG
-
-```python
-def on_cancel(self):
-    # If this throws, later cleanup doesn't run!
-    self.reverse_stock_entries()  # throws on error
-    self.reverse_gl_entries()     # never reached
-    self.update_linked_docs()     # never reached
-```
-
-### ✅ CORRECT
-
-```python
-def on_cancel(self):
+# ✅ CORRECT — Each operation isolated
+def on_update(self):
+    operations = [
+        (self.send_email, "Email"),
+        (self.sync_to_crm, "CRM sync"),
+        (self.update_dashboard, "Dashboard"),
+    ]
     errors = []
-    
-    try:
-        self.reverse_stock_entries()
-    except Exception as e:
-        errors.append(f"Stock: {str(e)}")
-        frappe.log_error(frappe.get_traceback(), "Stock Reversal Error")
-    
-    try:
-        self.reverse_gl_entries()
-    except Exception as e:
-        errors.append(f"GL: {str(e)}")
-        frappe.log_error(frappe.get_traceback(), "GL Reversal Error")
-    
-    try:
-        self.update_linked_docs()
-    except Exception as e:
-        errors.append(f"Linked docs: {str(e)}")
-    
+    for op, label in operations:
+        try:
+            op()
+        except Exception:
+            errors.append(label)
+            frappe.log_error(frappe.get_traceback(), f"{label} Error")
+
     if errors:
         frappe.msgprint(
-            _("Cancelled with errors: {0}").format("<br>".join(errors)),
+            _("Saved. Some operations failed: {0}").format(", ".join(errors)),
             indicator="orange"
         )
 ```
-
-**Why**: Cancel cleanup should try to complete all operations, logging errors for manual review.
+**Why:** Independent post-save operations should not block each other.
 
 ---
 
-## Quick Checklist: Controller Review
+## 9. Exposing Technical Errors to Users
 
-Before deploying controllers:
+```python
+# ❌ WRONG
+except Exception as e:
+    frappe.throw(str(e))  # Stack trace to user!
+    frappe.throw(frappe.get_traceback())  # Even worse!
 
-- [ ] `super()` called in all overridden methods
+# ✅ CORRECT
+except requests.Timeout:
+    frappe.throw(_("Service timed out. Please try again."))
+except ConnectionError:
+    frappe.throw(_("Could not connect to external service."))
+except Exception as e:
+    frappe.log_error(frappe.get_traceback(), "External Service Error")
+    frappe.throw(_("Service error. Please contact support."))
+```
+**Why:** Technical details confuse users and may expose sensitive information.
+
+---
+
+## 10. Broad Exception Handling Without Specificity
+
+```python
+# ❌ WRONG — All errors get same vague message
+try:
+    self.check_customer()
+    self.validate_items()
+    self.calculate_totals()
+except Exception:
+    frappe.throw(_("Validation failed"))
+
+# ✅ CORRECT — Specific handling per operation
+try:
+    self.check_customer()
+except frappe.DoesNotExistError:
+    frappe.throw(_("Customer not found"))
+
+try:
+    self.validate_items()
+except frappe.ValidationError:
+    raise  # Re-raise with original message
+
+self.calculate_totals()  # Let errors propagate naturally
+```
+**Why:** Specific exception handling gives better error messages and debugging.
+
+---
+
+## 11. Heavy Operations in validate
+
+```python
+# ❌ WRONG — 30-second API call blocks save
+def validate(self):
+    self.sync_to_external_api()  # Slow!
+    self.generate_pdf()          # Slow!
+
+# ✅ CORRECT — Queue heavy work
+def validate(self):
+    self.validate_fields()  # Fast validation only
+
+def on_update(self):
+    frappe.enqueue("myapp.tasks.sync_and_generate",
+        doctype=self.doctype, name=self.name, queue="long")
+```
+**Why:** Heavy operations in `validate` make the UI unresponsive and can timeout.
+
+---
+
+## 12. Missing Translation Wrapper
+
+```python
+# ❌ WRONG — Not translatable
+frappe.throw("Customer is required")
+frappe.msgprint("Order saved")
+
+# ✅ CORRECT
+frappe.throw(_("Customer is required"))
+frappe.msgprint(_("Order saved"))
+```
+**Why:** Without `_()`, messages are English-only regardless of user's language.
+
+---
+
+## 13. Throwing in on_cancel Cleanup
+
+```python
+# ❌ WRONG — First throw stops remaining cleanup
+def on_cancel(self):
+    self.reverse_stock()   # If this throws...
+    self.reverse_gl()      # ...this never runs!
+
+# ✅ CORRECT — Collect errors, try all operations
+def on_cancel(self):
+    errors = []
+    for op, label in [
+        (self.reverse_stock, "Stock"),
+        (self.reverse_gl, "GL entries"),
+    ]:
+        try:
+            op()
+        except Exception as e:
+            errors.append(f"{label}: {str(e)}")
+            frappe.log_error(frappe.get_traceback(), f"{label} Error")
+
+    if errors:
+        frappe.msgprint(
+            _("Cancelled with issues: {0}").format("<br>".join(errors)),
+            indicator="orange"
+        )
+```
+**Why:** Cancel cleanup should attempt ALL operations, not stop at the first failure.
+
+---
+
+## 14. Not Using Flags for Recursion Guard
+
+```python
+# ❌ WRONG — Updating linked doc triggers back-update loop
+def on_update(self):
+    if self.quotation:
+        q = frappe.get_doc("Quotation", self.quotation)
+        q.db_set("status", "Ordered")  # May trigger Quotation.on_update → back to here
+
+# ✅ CORRECT
+def on_update(self):
+    if self.flags.get("skip_linked_update"):
+        return
+    if self.quotation:
+        q = frappe.get_doc("Quotation", self.quotation)
+        q.flags.skip_linked_update = True
+        q.db_set("status", "Ordered")
+```
+**Why:** Cross-document updates can create circular hook triggers without recursion guards.
+
+---
+
+## Pre-Deploy Checklist
+
+- [ ] `super()` called in ALL overridden hooks
+- [ ] No `self.save()` in any hook
 - [ ] No `frappe.db.commit()` calls
-- [ ] No `self.save()` in hooks
-- [ ] Changes in `on_update` use `db_set()`
-- [ ] Multiple errors collected before throwing
-- [ ] Exceptions logged with `frappe.log_error()`
-- [ ] User-facing messages use `_()`
+- [ ] `on_update` changes use `db_set()`
+- [ ] All validation in `before_submit`, not `on_submit`
+- [ ] All exceptions logged with `frappe.log_error()`
+- [ ] Error messages use `_()` wrapper
 - [ ] None/empty values handled safely
-- [ ] Critical validations in `before_submit` not `on_submit`
-- [ ] Independent `on_update` operations isolated in try/except
+- [ ] Post-save operations isolated in try/except
 - [ ] Heavy operations enqueued, not inline
-- [ ] Database results checked before access
 - [ ] Specific exceptions caught before generic `Exception`
+- [ ] Recursion guards (`flags`) on cross-document updates
+- [ ] `on_cancel` operations isolated — don't stop on first failure

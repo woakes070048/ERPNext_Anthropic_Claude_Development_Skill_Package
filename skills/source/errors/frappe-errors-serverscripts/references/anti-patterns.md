@@ -1,465 +1,274 @@
-# Anti-Patterns - Server Script Error Handling
+# Server Script Anti-Patterns — Error Prevention
 
-Common mistakes to avoid when handling errors in Frappe/ERPNext Server Scripts.
-
----
-
-## 1. Using try/except in Server Scripts
-
-### ❌ WRONG
-
-```python
-# This will NOT work in Server Scripts!
-try:
-    result = frappe.get_doc("Customer", doc.customer)
-except Exception as e:
-    frappe.log_error(str(e))
-```
-
-### ✅ CORRECT
-
-```python
-# Check before access
-if frappe.db.exists("Customer", doc.customer):
-    result = frappe.get_doc("Customer", doc.customer)
-else:
-    frappe.throw(f"Customer '{doc.customer}' not found")
-```
-
-**Why**: The RestrictedPython sandbox in Server Scripts blocks try/except statements. Use conditional checks instead.
+Each anti-pattern shows the mistake, why it fails, and the correct approach.
 
 ---
 
-## 2. Using raise Statement
-
-### ❌ WRONG
+## 1. Using import Statements
 
 ```python
-if not doc.customer:
-    raise ValueError("Customer is required")
-```
-
-### ✅ CORRECT
-
-```python
-if not doc.customer:
-    frappe.throw("Customer is required")
-```
-
-**Why**: The `raise` statement is blocked in the sandbox. Use `frappe.throw()` instead.
-
----
-
-## 3. Using import Statements
-
-### ❌ WRONG
-
-```python
+# ❌ BLOCKED — ImportError: __import__ not found
 import json
-from datetime import datetime
+import datetime
+from collections import defaultdict
 
-data = json.loads(doc.json_data)
-today = datetime.now().date()
-```
-
-### ✅ CORRECT
-
-```python
-# Use frappe namespace directly
-data = frappe.parse_json(doc.json_data)
+# ✅ CORRECT — Use frappe namespace
+data = frappe.parse_json(doc.json_field)
 today = frappe.utils.today()
+result = frappe._dict()
 ```
-
-**Why**: All imports are blocked in the sandbox. Use Frappe's built-in utilities through the `frappe` namespace.
+**Why:** RestrictedPython blocks all imports. Only `json` module is pre-loaded. Use `frappe.utils`, `frappe.parse_json()`, `frappe.make_get_request()`.
 
 ---
 
-## 4. Not Checking if Record Exists Before get_doc
-
-### ❌ WRONG
+## 2. Using try/except Blocks
 
 ```python
-# Will crash if customer doesn't exist
-customer = frappe.get_doc("Customer", doc.customer)
-credit_limit = customer.credit_limit
-```
+# ❌ BLOCKED — SyntaxError: Try/Except not allowed
+try:
+    customer = frappe.get_doc("Customer", doc.customer)
+except Exception:
+    frappe.throw("Not found")
 
-### ✅ CORRECT
-
-```python
-# Check existence first
+# ✅ CORRECT — Conditional check first
 if not frappe.db.exists("Customer", doc.customer):
     frappe.throw(f"Customer '{doc.customer}' not found")
-
 customer = frappe.get_doc("Customer", doc.customer)
-credit_limit = customer.credit_limit
 ```
-
-**Or use safe value lookup:**
-
-```python
-credit_limit = frappe.db.get_value("Customer", doc.customer, "credit_limit") or 0
-```
-
-**Why**: Without existence check, missing records cause cryptic errors instead of user-friendly messages.
+**Why:** RestrictedPython blocks exception handling [v14-v15]. Use `if/else` with existence checks.
 
 ---
 
-## 5. Throwing on First Error
-
-### ❌ WRONG
+## 3. Using raise Statement
 
 ```python
-if not doc.customer:
-    frappe.throw("Customer is required")
-# User has to save multiple times to find all errors
-if not doc.delivery_date:
-    frappe.throw("Delivery Date is required")
-if not doc.items:
-    frappe.throw("Items are required")
+# ❌ BLOCKED — SyntaxError: raise not allowed
+if amount < 0:
+    raise ValueError("Negative amount")
+
+# ✅ CORRECT
+if amount < 0:
+    frappe.throw("Amount cannot be negative")
 ```
-
-### ✅ CORRECT
-
-```python
-errors = []
-
-if not doc.customer:
-    errors.append("Customer is required")
-if not doc.delivery_date:
-    errors.append("Delivery Date is required")
-if not doc.items:
-    errors.append("At least one item is required")
-
-if errors:
-    frappe.throw("<br>".join(errors), title="Please fix these errors")
-```
-
-**Why**: Users shouldn't have to save multiple times to discover all validation errors.
+**Why:** `raise` is blocked. Use `frappe.throw()` which raises `frappe.ValidationError` internally.
 
 ---
 
-## 6. Forgetting frappe.db.commit() in Scheduler
-
-### ❌ WRONG
+## 4. Calling doc.save() in Before Save
 
 ```python
-# Type: Scheduler Event
-for item in items:
-    frappe.db.set_value("Item", item.name, "last_sync", frappe.utils.now())
-# Changes are lost!
-```
-
-### ✅ CORRECT
-
-```python
-# Type: Scheduler Event
-for item in items:
-    frappe.db.set_value("Item", item.name, "last_sync", frappe.utils.now())
-
-frappe.db.commit()  # REQUIRED!
-```
-
-**Why**: Scheduler scripts don't auto-commit. Without explicit commit, all database changes are lost.
-
----
-
-## 7. Calling doc.save() in Before Save Event
-
-### ❌ WRONG
-
-```python
-# Type: Document Event - Before Save
+# ❌ WRONG — Infinite recursion
+# Event: Before Save
 doc.status = "Validated"
-doc.save()  # Causes infinite loop or error!
-```
+doc.save()  # Triggers Before Save again!
 
-### ✅ CORRECT
-
-```python
-# Type: Document Event - Before Save
+# ✅ CORRECT — Just set the value
+# Event: Before Save
 doc.status = "Validated"
-# Just set the value - framework handles the save
+# Framework saves automatically after Before Save
 ```
-
-**Why**: The document is already being saved. Calling `save()` again causes recursion or errors.
+**Why:** `doc.save()` in Before Save triggers the event again, causing infinite recursion.
 
 ---
 
-## 8. Not Escaping User Input in SQL
-
-### ❌ WRONG
+## 5. Forgetting frappe.db.commit() in Scheduler
 
 ```python
-# SQL injection vulnerability!
+# ❌ WRONG — All changes lost!
+# Type: Scheduler Event
+for item in frappe.get_all("Item", filters={"sync_pending": 1}, limit=100):
+    frappe.db.set_value("Item", item.name, "sync_pending", 0)
+
+# ✅ CORRECT
+for item in frappe.get_all("Item", filters={"sync_pending": 1}, limit=100):
+    frappe.db.set_value("Item", item.name, "sync_pending", 0)
+frappe.db.commit()  # REQUIRED
+```
+**Why:** Scheduler scripts do NOT auto-commit. Without explicit commit, all changes are rolled back.
+
+---
+
+## 6. No Query Limit in Scheduler
+
+```python
+# ❌ WRONG — May load millions of records
+# Type: Scheduler Event
+all_records = frappe.get_all("Sales Invoice", fields=["*"])
+
+# ✅ CORRECT — Always limit
+records = frappe.get_all("Sales Invoice",
+    filters={"status": "Unpaid", "docstatus": 1},
+    fields=["name", "customer"],
+    limit=500
+)
+```
+**Why:** Unlimited queries exhaust memory and crash the worker process.
+
+---
+
+## 7. Not Escaping User Input in SQL
+
+```python
+# ❌ VULNERABLE — SQL injection
 territory = frappe.form_dict.get("territory")
 conditions = f"`tabCustomer`.territory = '{territory}'"
-```
 
-### ✅ CORRECT
-
-```python
+# ✅ SAFE
 territory = frappe.form_dict.get("territory")
 conditions = f"`tabCustomer`.territory = {frappe.db.escape(territory)}"
 ```
-
-**Why**: Unescaped user input allows SQL injection attacks.
-
----
-
-## 9. Not Adding Limits to Scheduler Queries
-
-### ❌ WRONG
-
-```python
-# Type: Scheduler Event
-# Could return millions of records!
-all_customers = frappe.get_all("Customer", fields=["name", "email"])
-
-for customer in all_customers:
-    send_newsletter(customer)
-```
-
-### ✅ CORRECT
-
-```python
-# Type: Scheduler Event
-BATCH_SIZE = 100
-
-customers = frappe.get_all(
-    "Customer",
-    filters={"newsletter_sent": 0},
-    fields=["name", "email"],
-    limit=BATCH_SIZE
-)
-
-for customer in customers:
-    send_newsletter(customer)
-    frappe.db.set_value("Customer", customer.name, "newsletter_sent", 1)
-
-frappe.db.commit()
-```
-
-**Why**: Unlimited queries can exhaust memory and crash the worker.
+**Why:** Unescaped user input allows SQL injection attacks.
 
 ---
 
-## 10. Exposing Technical Errors to Users
-
-### ❌ WRONG
+## 8. Not Checking Record Existence Before get_doc
 
 ```python
+# ❌ WRONG — Crashes with DoesNotExistError
+customer = frappe.get_doc("Customer", doc.customer)
+
+# ✅ CORRECT — Check first
+if not frappe.db.exists("Customer", doc.customer):
+    frappe.throw(f"Customer '{doc.customer}' not found")
+customer = frappe.get_doc("Customer", doc.customer)
+```
+**Why:** `frappe.get_doc()` raises an exception if record doesn't exist. Without try/except in sandbox, this crashes the script.
+
+---
+
+## 9. Throwing on First Error
+
+```python
+# ❌ WRONG — User fixes one error, hits the next
+if not doc.customer: frappe.throw("Customer required")
+if not doc.delivery_date: frappe.throw("Date required")
+if not doc.items: frappe.throw("Items required")
+
+# ✅ CORRECT — Collect all errors
+errors = []
+if not doc.customer: errors.append("Customer is required")
+if not doc.delivery_date: errors.append("Delivery Date is required")
+if not doc.items: errors.append("At least one item is required")
+if errors:
+    frappe.throw("<br>".join(errors), title="Please fix these errors")
+```
+**Why:** Users should see ALL errors at once, not one at a time.
+
+---
+
+## 10. Exposing Technical Errors
+
+```python
+# ❌ WRONG — Confusing for users
 if not customer_data:
-    frappe.throw(f"KeyError: 'credit_limit' not found in dict for {doc.customer}")
-```
+    frappe.throw(f"KeyError: 'credit_limit' not found in dict")
 
-### ✅ CORRECT
-
-```python
+# ✅ CORRECT — Actionable message
 if not customer_data:
     frappe.throw(f"Customer '{doc.customer}' not found. Please select a valid customer.")
 ```
-
-**Why**: Technical error messages confuse users. Provide clear, actionable messages.
+**Why:** Technical messages confuse users. Provide clear, actionable instructions.
 
 ---
 
 ## 11. Silent Failures in Scheduler
 
-### ❌ WRONG
-
 ```python
+# ❌ WRONG — No logging, debugging impossible
 # Type: Scheduler Event
-for invoice in invoices:
-    if not invoice.customer:
-        continue  # Silent skip - no one knows this failed
-    process(invoice)
-```
+for inv in invoices:
+    if not inv.customer:
+        continue  # Silent skip
 
-### ✅ CORRECT
-
-```python
-# Type: Scheduler Event
+# ✅ CORRECT — Log all skips and errors
 errors = []
-
-for invoice in invoices:
-    if not invoice.customer:
-        errors.append(f"{invoice.name}: Missing customer")
+for inv in invoices:
+    if not inv.customer:
+        errors.append(f"{inv.name}: Missing customer")
         continue
-    process(invoice)
+    process(inv)
 
 if errors:
-    frappe.log_error("\n".join(errors), "Invoice Processing Errors")
-
+    frappe.log_error("\n".join(errors), "Processing Errors")
 frappe.db.commit()
 ```
-
-**Why**: Scheduler errors have no user to see them. Always log errors for debugging.
-
----
-
-## 12. Using Blocking Operations in Document Events
-
-### ❌ WRONG
-
-```python
-# Type: Document Event - After Save
-# Slow external API call blocks the save response
-import requests  # Won't work anyway
-response = requests.post("https://external-api.com/sync", json=data)
-```
-
-### ✅ CORRECT
-
-```python
-# Type: Document Event - After Save
-# Queue for background processing
-frappe.enqueue(
-    "myapp.tasks.sync_to_external",
-    queue="short",
-    doc_name=doc.name
-)
-
-# Or use Scheduler script for batch processing
-```
-
-**Why**: Document events should be fast. Long operations block the UI and may timeout.
+**Why:** Scheduler has no user to see errors. ALWAYS log for debugging.
 
 ---
 
-## 13. Assuming Values Exist in Child Tables
-
-### ❌ WRONG
+## 12. Wrong Exception Type in API Scripts
 
 ```python
-total = sum(item.qty * item.rate for item in doc.items)  # Crashes if qty/rate is None
-```
-
-### ✅ CORRECT
-
-```python
-total = sum(
-    (item.qty or 0) * (item.rate or 0) 
-    for item in (doc.items or [])
-)
-```
-
-**Why**: Child table fields can be None. Always provide defaults.
-
----
-
-## 14. Not Handling Empty API Parameters
-
-### ❌ WRONG
-
-```python
+# ❌ WRONG — Returns 417 for "not found" (should be 404)
 # Type: API
-customer = frappe.form_dict.customer  # None if not provided
-data = frappe.get_all("Sales Order", filters={"customer": customer})  # Bad filter!
-```
+if not frappe.db.exists("Customer", customer):
+    frappe.throw("Not found")  # Default: ValidationError → 417
 
-### ✅ CORRECT
+# ✅ CORRECT — Use proper exception type
+if not frappe.db.exists("Customer", customer):
+    frappe.throw("Not found", exc=frappe.DoesNotExistError)  # → 404
+```
+**Why:** Correct HTTP status codes help API consumers handle errors properly.
+
+---
+
+## 13. Modifying doc After on_update Event
 
 ```python
+# ❌ WRONG — Changes NOT saved
+# Event: After Save
+doc.sync_status = "Synced"  # Lost!
+
+# ✅ CORRECT — Use frappe.db.set_value
+# Event: After Save
+frappe.db.set_value(doc.doctype, doc.name, "sync_status", "Synced")
+```
+**Why:** After save, changes to `doc` object are not persisted. Use `frappe.db.set_value()`.
+
+---
+
+## 14. Assuming doc Exists in API/Scheduler Scripts
+
+```python
+# ❌ WRONG — doc is undefined in API scripts!
+# Type: API
+frappe.response["message"] = doc.customer  # NameError: doc not defined
+
+# ✅ CORRECT — Use frappe.form_dict for API parameters
 # Type: API
 customer = frappe.form_dict.get("customer")
-
 if not customer:
-    frappe.throw("Parameter 'customer' is required", exc=frappe.ValidationError)
-
-data = frappe.get_all("Sales Order", filters={"customer": customer})
+    frappe.throw("'customer' parameter required", exc=frappe.ValidationError)
+frappe.response["message"] = customer
 ```
-
-**Why**: Missing parameters should be caught early with clear error messages.
+**Why:** `doc` is only available in Document Event scripts, not in API or Scheduler scripts.
 
 ---
 
-## 15. Ignoring Return Values
-
-### ❌ WRONG
+## 15. Assuming Child Table Values Are Not None
 
 ```python
-frappe.db.get_value("Customer", doc.customer, "credit_limit")
-# Value is discarded!
+# ❌ WRONG — Crashes if qty or rate is None
+total = sum(item.qty * item.rate for item in doc.items)
 
-if credit_limit > doc.grand_total:  # credit_limit is undefined!
-    frappe.throw("Credit limit exceeded")
+# ✅ CORRECT — Default to 0
+total = sum((item.qty or 0) * (item.rate or 0) for item in (doc.items or []))
 ```
-
-### ✅ CORRECT
-
-```python
-credit_limit = frappe.db.get_value("Customer", doc.customer, "credit_limit") or 0
-
-if credit_limit > 0 and doc.grand_total > credit_limit:
-    frappe.throw(f"Credit limit exceeded. Limit: {credit_limit}")
-```
-
-**Why**: Database lookups must be assigned to variables to be used.
+**Why:** Child table fields can be None. Always provide default values.
 
 ---
 
-## 16. Wrong Exception Type for API Errors
+## Pre-Deploy Checklist
 
-### ❌ WRONG
-
-```python
-# Type: API
-if not frappe.db.exists("Customer", customer):
-    frappe.throw("Customer not found")  # Returns 417 (wrong!)
-```
-
-### ✅ CORRECT
-
-```python
-# Type: API
-if not frappe.db.exists("Customer", customer):
-    frappe.throw("Customer not found", exc=frappe.DoesNotExistError)  # Returns 404
-```
-
-**Why**: Correct HTTP status codes help API consumers handle errors properly.
-
----
-
-## 17. Modifying doc After on_update
-
-### ❌ WRONG
-
-```python
-# Type: Document Event - After Save (on_update)
-doc.sync_status = "Synced"
-doc.sync_date = frappe.utils.now()
-# Changes are NOT saved!
-```
-
-### ✅ CORRECT
-
-```python
-# Type: Document Event - After Save (on_update)
-frappe.db.set_value(doc.doctype, doc.name, {
-    "sync_status": "Synced",
-    "sync_date": frappe.utils.now()
-})
-```
-
-**Why**: After the save event, changes to `doc` are not automatically persisted. Use `frappe.db.set_value()` instead.
-
----
-
-## Quick Checklist: Server Script Error Handling Review
-
-Before deploying server scripts, verify:
-
-- [ ] No try/except statements (use conditional checks)
-- [ ] No raise statements (use frappe.throw)
-- [ ] No import statements (use frappe namespace)
+- [ ] No `import` statements (except `json`)
+- [ ] No `try/except` or `raise` statements
+- [ ] No `doc.save()` in Before Save events
 - [ ] All database lookups have existence checks
-- [ ] Multiple validation errors are collected and thrown together
-- [ ] Scheduler scripts have frappe.db.commit()
-- [ ] Scheduler scripts have query limits
-- [ ] No doc.save() in Before Save events
-- [ ] All user input is escaped in SQL conditions
+- [ ] Multiple errors collected before `frappe.throw()`
+- [ ] Scheduler scripts have `frappe.db.commit()`
+- [ ] Scheduler scripts have query `limit`
+- [ ] All user input escaped in SQL conditions
 - [ ] API scripts use correct exception types
-- [ ] Scheduler errors are logged
-- [ ] Technical errors are not exposed to users
-- [ ] Child table values have defaults (or 0)
+- [ ] Scheduler errors logged with `frappe.log_error()`
+- [ ] API scripts set `frappe.response["message"]`
+- [ ] Child table values have defaults (`or 0`, `or []`)

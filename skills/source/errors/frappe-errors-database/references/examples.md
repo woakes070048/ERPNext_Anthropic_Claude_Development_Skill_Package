@@ -1,10 +1,10 @@
-# Examples - Database Error Handling
+# Examples — Database Error Handling
 
 Complete working examples of error handling for Frappe/ERPNext database operations.
 
 ---
 
-## Example 1: Customer Management with Full Error Handling
+## Example 1: Customer API with Full Error Handling
 
 ```python
 # myapp/api/customer.py
@@ -13,65 +13,53 @@ from frappe import _
 
 @frappe.whitelist()
 def get_customer(customer_name):
-    """Get customer with error handling."""
+    """Get customer with proper error handling."""
     if not customer_name:
         frappe.throw(_("Customer name is required"))
-    
-    # Check existence first
-    if not frappe.db.exists("Customer", customer_name):
-        frappe.throw(
-            _("Customer '{0}' not found").format(customer_name),
-            exc=frappe.DoesNotExistError
-        )
-    
-    # Get customer data
-    customer = frappe.db.get_value(
-        "Customer",
-        customer_name,
+
+    data = frappe.db.get_value(
+        "Customer", customer_name,
         ["name", "customer_name", "customer_type", "credit_limit", "disabled"],
         as_dict=True
     )
-    
-    if customer.disabled:
-        frappe.throw(_("Customer '{0}' is disabled").format(customer.customer_name))
-    
-    return customer
+
+    if not data:
+        frappe.throw(_("Customer '{0}' not found").format(customer_name),
+                     exc=frappe.DoesNotExistError)
+
+    if data.disabled:
+        frappe.throw(_("Customer '{0}' is disabled").format(data.customer_name))
+
+    return data
 
 
 @frappe.whitelist()
-def create_customer(customer_name, customer_type="Company", territory=None):
-    """Create customer with duplicate handling."""
+def create_customer(customer_name, customer_type="Company"):
+    """Create customer with duplicate and validation handling."""
     if not customer_name:
         frappe.throw(_("Customer name is required"))
-    
-    # Check for existing
-    existing = frappe.db.exists("Customer", {"customer_name": customer_name})
-    if existing:
-        frappe.throw(
-            _("Customer '{0}' already exists").format(customer_name),
-            exc=frappe.DuplicateEntryError
-        )
-    
+
+    if frappe.db.exists("Customer", {"customer_name": customer_name}):
+        frappe.throw(_("Customer '{0}' already exists").format(customer_name),
+                     exc=frappe.DuplicateEntryError)
+
     try:
         doc = frappe.get_doc({
             "doctype": "Customer",
             "customer_name": customer_name,
-            "customer_type": customer_type,
-            "territory": territory or frappe.db.get_single_value("Selling Settings", "territory")
+            "customer_type": customer_type
         })
         doc.insert()
-        
-        return {
-            "success": True,
-            "name": doc.name,
-            "message": _("Customer created successfully")
-        }
-        
+        return {"success": True, "name": doc.name}
+
     except frappe.DuplicateEntryError:
-        # Race condition - check again
+        # Race condition — another user created it
         existing = frappe.db.get_value("Customer", {"customer_name": customer_name}, "name")
-        frappe.throw(_("Customer '{0}' was just created by another user").format(customer_name))
-        
+        frappe.throw(_("Customer was just created by another user"))
+
+    except frappe.MandatoryError as e:
+        frappe.throw(_("Missing required field: {0}").format(e))
+
     except frappe.ValidationError as e:
         frappe.throw(str(e))
 
@@ -81,69 +69,45 @@ def update_customer(customer_name, updates):
     """Update customer with concurrent edit handling."""
     if not customer_name:
         frappe.throw(_("Customer name is required"))
-    
+
     if not frappe.db.exists("Customer", customer_name):
-        frappe.throw(
-            _("Customer '{0}' not found").format(customer_name),
-            exc=frappe.DoesNotExistError
-        )
-    
+        frappe.throw(_("Customer not found"), exc=frappe.DoesNotExistError)
+
     try:
         doc = frappe.get_doc("Customer", customer_name)
-        
-        # Parse updates if string
         if isinstance(updates, str):
             updates = frappe.parse_json(updates)
-        
         doc.update(updates)
         doc.save()
-        
-        return {
-            "success": True,
-            "name": doc.name,
-            "message": _("Customer updated successfully")
-        }
-        
+        return {"success": True, "name": doc.name}
+
     except frappe.TimestampMismatchError:
-        frappe.throw(
-            _("Customer was modified by another user. Please refresh and try again."),
-            title=_("Concurrent Edit")
-        )
+        frappe.throw(_("Modified by another user. Please refresh."))
+    except frappe.CharacterLengthExceededError:
+        frappe.throw(_("One or more fields exceed maximum length"))
     except frappe.ValidationError as e:
         frappe.throw(str(e))
 
 
 @frappe.whitelist()
 def delete_customer(customer_name):
-    """Delete customer with link handling."""
+    """Delete customer with link checking."""
     if not customer_name:
         frappe.throw(_("Customer name is required"))
-    
+
     if not frappe.db.exists("Customer", customer_name):
-        return {"success": True, "message": _("Customer already deleted")}
-    
-    # Check for linked documents first
-    linked_invoices = frappe.db.count("Sales Invoice", {"customer": customer_name})
-    linked_orders = frappe.db.count("Sales Order", {"customer": customer_name})
-    
-    if linked_invoices or linked_orders:
-        frappe.throw(
-            _("Cannot delete customer. Linked documents exist:<br>"
-              "• Sales Invoices: {0}<br>"
-              "• Sales Orders: {1}").format(linked_invoices, linked_orders),
-            title=_("Delete Error"),
-            exc=frappe.LinkExistsError
-        )
-    
+        return {"success": True, "message": "Already deleted"}
+
+    # Pre-check for common linked documents
+    linked = frappe.db.count("Sales Invoice", {"customer": customer_name, "docstatus": 1})
+    if linked:
+        frappe.throw(_("Cannot delete — {0} submitted invoice(s) exist").format(linked))
+
     try:
         frappe.delete_doc("Customer", customer_name)
-        return {
-            "success": True,
-            "message": _("Customer deleted successfully")
-        }
-        
+        return {"success": True}
     except frappe.LinkExistsError:
-        frappe.throw(_("Cannot delete customer. It is linked to other documents."))
+        frappe.throw(_("Cannot delete — linked documents exist"))
 ```
 
 ---
@@ -157,119 +121,54 @@ from frappe import _
 
 @frappe.whitelist()
 def import_items(items_json):
-    """
-    Import items from JSON with comprehensive error handling.
-    Returns detailed results.
-    """
-    if not items_json:
-        frappe.throw(_("No items provided"))
-    
+    """Import items with per-record error tracking."""
     items = frappe.parse_json(items_json)
     if not items:
-        frappe.throw(_("Invalid items data"))
-    
+        frappe.throw(_("No items provided"))
+
     results = {
-        "total": len(items),
-        "created": 0,
-        "updated": 0,
-        "skipped": 0,
-        "failed": 0,
-        "details": []
+        "total": len(items), "created": 0, "updated": 0,
+        "failed": 0, "errors": []
     }
-    
+
     for idx, item_data in enumerate(items, 1):
-        item_code = item_data.get("item_code")
-        
-        if not item_code:
+        code = item_data.get("item_code")
+        if not code:
             results["failed"] += 1
-            results["details"].append({
-                "row": idx,
-                "status": "failed",
-                "error": "Item code is required"
-            })
+            results["errors"].append({"row": idx, "error": "Item code required"})
             continue
-        
+
         try:
-            # Check if exists
-            if frappe.db.exists("Item", item_code):
-                # Update existing
-                doc = frappe.get_doc("Item", item_code)
+            if frappe.db.exists("Item", code):
+                doc = frappe.get_doc("Item", code)
                 doc.update(item_data)
                 doc.save()
                 results["updated"] += 1
-                results["details"].append({
-                    "row": idx,
-                    "item_code": item_code,
-                    "status": "updated"
-                })
             else:
-                # Create new
-                doc = frappe.get_doc({
-                    "doctype": "Item",
-                    **item_data
-                })
+                doc = frappe.get_doc({"doctype": "Item", **item_data})
                 doc.insert()
                 results["created"] += 1
-                results["details"].append({
-                    "row": idx,
-                    "item_code": item_code,
-                    "status": "created"
-                })
-                
+
         except frappe.DuplicateEntryError:
-            results["skipped"] += 1
-            results["details"].append({
-                "row": idx,
-                "item_code": item_code,
-                "status": "skipped",
-                "error": "Duplicate entry"
-            })
-            
+            results["errors"].append({"row": idx, "item": code, "error": "Duplicate"})
+        except frappe.MandatoryError as e:
+            results["failed"] += 1
+            results["errors"].append({"row": idx, "item": code, "error": f"Missing: {e}"})
+        except frappe.CharacterLengthExceededError:
+            results["failed"] += 1
+            results["errors"].append({"row": idx, "item": code, "error": "Field too long"})
         except frappe.ValidationError as e:
             results["failed"] += 1
-            results["details"].append({
-                "row": idx,
-                "item_code": item_code,
-                "status": "failed",
-                "error": str(e)[:200]
-            })
-            
-        except Exception as e:
+            results["errors"].append({"row": idx, "item": code, "error": str(e)[:200]})
+        except Exception:
             results["failed"] += 1
-            frappe.log_error(
-                frappe.get_traceback(),
-                f"Item import error: {item_code}"
-            )
-            results["details"].append({
-                "row": idx,
-                "item_code": item_code,
-                "status": "failed",
-                "error": "Unexpected error - logged for review"
-            })
-        
-        # Commit every 50 items
+            frappe.log_error(frappe.get_traceback(), f"Import error: {code}")
+            results["errors"].append({"row": idx, "item": code, "error": "Unexpected"})
+
         if idx % 50 == 0:
             frappe.db.commit()
-    
-    # Final commit
+
     frappe.db.commit()
-    
-    # Summary message
-    if results["failed"] > 0:
-        frappe.msgprint(
-            _("Import completed with errors. Created: {0}, Updated: {1}, Failed: {2}").format(
-                results["created"], results["updated"], results["failed"]
-            ),
-            indicator="orange"
-        )
-    else:
-        frappe.msgprint(
-            _("Import completed successfully. Created: {0}, Updated: {1}").format(
-                results["created"], results["updated"]
-            ),
-            indicator="green"
-        )
-    
     return results
 ```
 
@@ -283,171 +182,127 @@ import frappe
 from frappe import _
 
 def execute(filters=None):
-    """Sales report with query error handling."""
-    columns = get_columns()
-    
-    try:
-        data = get_data(filters)
-    except frappe.db.InternalError as e:
-        frappe.log_error(frappe.get_traceback(), "Sales Report Query Error")
-        frappe.throw(_("Error generating report. Please try again or contact support."))
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Sales Report Error")
-        frappe.throw(_("An error occurred. Please try again."))
-    
-    return columns, data
-
-
-def get_columns():
-    return [
-        {"label": _("Invoice"), "fieldname": "name", "fieldtype": "Link", "options": "Sales Invoice", "width": 120},
-        {"label": _("Customer"), "fieldname": "customer", "fieldtype": "Link", "options": "Customer", "width": 150},
+    """Sales report with comprehensive query error handling."""
+    columns = [
+        {"label": _("Invoice"), "fieldname": "name", "fieldtype": "Link",
+         "options": "Sales Invoice", "width": 120},
+        {"label": _("Customer"), "fieldname": "customer", "fieldtype": "Link",
+         "options": "Customer", "width": 150},
         {"label": _("Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
         {"label": _("Total"), "fieldname": "grand_total", "fieldtype": "Currency", "width": 120},
     ]
 
+    try:
+        data = get_report_data(filters)
+    except frappe.QueryTimeoutError:
+        frappe.throw(_("Report too large. Please narrow your date range."))
+    except frappe.db.InternalError:
+        frappe.log_error(frappe.get_traceback(), "Sales Report Query Error")
+        frappe.throw(_("Database error. Please try again."))
 
-def get_data(filters):
-    """Get report data with safe query."""
-    conditions = []
+    return columns, data
+
+
+def get_report_data(filters):
+    """Build and execute report query with parameterized SQL."""
+    conditions = ["si.docstatus = 1"]
     values = {}
-    
-    # Build conditions safely
+
     if filters.get("customer"):
         conditions.append("si.customer = %(customer)s")
-        values["customer"] = filters.get("customer")
-    
+        values["customer"] = filters["customer"]
+
     if filters.get("from_date"):
         conditions.append("si.posting_date >= %(from_date)s")
-        values["from_date"] = filters.get("from_date")
-    
+        values["from_date"] = filters["from_date"]
+
     if filters.get("to_date"):
         conditions.append("si.posting_date <= %(to_date)s")
-        values["to_date"] = filters.get("to_date")
-    
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
-    
-    # Safe parameterized query
-    query = f"""
-        SELECT
-            si.name,
-            si.customer,
-            si.posting_date,
-            si.grand_total
+        values["to_date"] = filters["to_date"]
+
+    where = " AND ".join(conditions)
+
+    return frappe.db.sql(f"""
+        SELECT si.name, si.customer, si.posting_date, si.grand_total
         FROM `tabSales Invoice` si
-        WHERE si.docstatus = 1
-        AND {where_clause}
+        WHERE {where}
         ORDER BY si.posting_date DESC
         LIMIT 1000
-    """
-    
-    return frappe.db.sql(query, values, as_dict=True)
+    """, values, as_dict=True)
 ```
 
 ---
 
-## Example 4: Background Job with Database Operations
+## Example 4: Background Sync with Database Error Recovery
 
 ```python
-# myapp/tasks/sync_task.py
+# myapp/tasks/sync.py
 import frappe
 from frappe import _
 
-def sync_customers_to_external():
-    """
-    Background task to sync customers.
-    Proper error handling for background jobs.
-    """
-    results = {
-        "synced": 0,
-        "failed": 0,
-        "errors": []
-    }
-    
+def sync_customers():
+    """Background sync with connection recovery and per-record error handling."""
+    results = {"synced": 0, "failed": 0, "errors": []}
+
     try:
-        # Get customers to sync (ALWAYS limit!)
         customers = frappe.get_all(
             "Customer",
             filters={"sync_status": "Pending"},
-            fields=["name", "customer_name", "email_id"],
-            limit=200
+            fields=["name", "customer_name"],
+            limit=200  # ALWAYS limit
         )
-        
+
         if not customers:
             frappe.db.commit()
-            return {"message": "No customers to sync"}
-        
+            return
+
         for customer in customers:
             try:
-                # Sync to external system
-                external_id = sync_to_external(customer)
-                
-                # Update sync status
-                frappe.db.set_value(
-                    "Customer",
-                    customer.name,
-                    {
-                        "sync_status": "Synced",
-                        "external_id": external_id,
-                        "last_sync": frappe.utils.now()
-                    }
-                )
+                external_id = call_external_api(customer)
+                frappe.db.set_value("Customer", customer.name, {
+                    "sync_status": "Synced",
+                    "external_id": external_id
+                })
                 results["synced"] += 1
-                
+
+            except frappe.db.InternalError as e:
+                msg = str(e).lower()
+                if "gone away" in msg or "lost connection" in msg:
+                    frappe.db.connect()  # Reconnect
+                    frappe.log_error("Connection lost during sync", "Sync Recovery")
+                else:
+                    raise
+
             except Exception as e:
                 results["failed"] += 1
-                results["errors"].append({
-                    "customer": customer.name,
-                    "error": str(e)[:200]
+                frappe.db.set_value("Customer", customer.name, {
+                    "sync_status": "Failed",
+                    "sync_error": str(e)[:500]
                 })
-                
-                # Mark as failed
-                frappe.db.set_value(
-                    "Customer",
-                    customer.name,
-                    {
-                        "sync_status": "Failed",
-                        "sync_error": str(e)[:500]
-                    }
-                )
-                
-                frappe.log_error(
-                    frappe.get_traceback(),
-                    f"Customer sync error: {customer.name}"
-                )
-        
-        # REQUIRED: Commit in background job
-        frappe.db.commit()
-        
-    except frappe.db.InternalError as e:
+                frappe.log_error(frappe.get_traceback(), f"Sync: {customer.name}")
+
+        frappe.db.commit()  # REQUIRED in background job
+
+    except frappe.QueryDeadlockError:
         frappe.db.rollback()
-        frappe.log_error(frappe.get_traceback(), "Sync Task Database Error")
-        results["fatal_error"] = str(e)
-        
-    except Exception as e:
+        frappe.log_error("Deadlock during sync", "Sync Deadlock")
+
+    except Exception:
         frappe.db.rollback()
-        frappe.log_error(frappe.get_traceback(), "Sync Task Error")
-        results["fatal_error"] = str(e)
-    
-    # Log summary
-    if results.get("failed") or results.get("fatal_error"):
-        frappe.log_error(
-            frappe.as_json(results),
-            "Customer Sync Summary - With Errors"
-        )
-    
-    return results
+        frappe.log_error(frappe.get_traceback(), "Sync Fatal Error")
+
+    if results["failed"]:
+        frappe.log_error(frappe.as_json(results), "Sync Summary")
 
 
-def sync_to_external(customer):
-    """Sync customer to external system."""
-    # Implementation
+def call_external_api(customer):
+    """Call external API — stub."""
     return "EXT-001"
 ```
 
 ---
 
-## Example 5: Controller with Database Error Handling
+## Example 5: Controller with Complete Database Error Handling
 
 ```python
 # myapp/doctype/custom_order/custom_order.py
@@ -457,109 +312,104 @@ from frappe.model.document import Document
 
 class CustomOrder(Document):
     def validate(self):
-        """Validation with database lookups."""
         self.validate_customer()
         self.validate_items()
         self.calculate_totals()
-    
+
     def validate_customer(self):
-        """Validate customer with proper error handling."""
         if not self.customer:
             frappe.throw(_("Customer is required"))
-        
-        # Safe lookup
-        customer_data = frappe.db.get_value(
-            "Customer",
-            self.customer,
+
+        data = frappe.db.get_value(
+            "Customer", self.customer,
             ["customer_name", "disabled", "credit_limit"],
             as_dict=True
         )
-        
-        if not customer_data:
-            frappe.throw(
-                _("Customer '{0}' not found").format(self.customer),
-                exc=frappe.DoesNotExistError
-            )
-        
-        if customer_data.disabled:
-            frappe.throw(_("Customer '{0}' is disabled").format(customer_data.customer_name))
-        
-        # Credit check
-        if customer_data.credit_limit:
-            outstanding = self.get_customer_outstanding()
-            if outstanding + self.grand_total > customer_data.credit_limit:
-                frappe.msgprint(
-                    _("Warning: This order will exceed customer credit limit"),
-                    indicator="orange"
-                )
-    
+
+        if not data:
+            frappe.throw(_("Customer '{0}' not found").format(self.customer))
+        if data.disabled:
+            frappe.throw(_("Customer is disabled"))
+
     def validate_items(self):
-        """Validate items with batch lookup."""
         if not self.items:
             frappe.throw(_("At least one item is required"))
-        
+
         errors = []
-        
-        # Batch fetch items for efficiency
-        item_codes = [row.item_code for row in self.items if row.item_code]
-        if item_codes:
-            existing_items = {
-                d.name: d for d in frappe.get_all(
-                    "Item",
-                    filters={"name": ["in", item_codes]},
-                    fields=["name", "item_name", "disabled", "is_sales_item"]
-                )
-            }
-        else:
-            existing_items = {}
-        
+
+        # Batch fetch for efficiency — avoids N+1 queries
+        codes = [r.item_code for r in self.items if r.item_code]
+        existing = {
+            d.name: d for d in frappe.get_all(
+                "Item",
+                filters={"name": ["in", codes]},
+                fields=["name", "item_name", "disabled", "is_sales_item"]
+            )
+        } if codes else {}
+
         for idx, row in enumerate(self.items, 1):
             if not row.item_code:
-                errors.append(_("Row {0}: Item code is required").format(idx))
+                errors.append(_("Row {0}: Item code required").format(idx))
                 continue
-            
-            item = existing_items.get(row.item_code)
+            item = existing.get(row.item_code)
             if not item:
                 errors.append(_("Row {0}: Item '{1}' not found").format(idx, row.item_code))
             elif item.disabled:
-                errors.append(_("Row {0}: Item '{1}' is disabled").format(idx, item.item_name))
-            elif not item.is_sales_item:
-                errors.append(_("Row {0}: Item '{1}' is not a sales item").format(idx, item.item_name))
-        
+                errors.append(_("Row {0}: Item '{1}' disabled").format(idx, item.item_name))
+
         if errors:
             frappe.throw("<br>".join(errors), title=_("Item Errors"))
-    
+
     def calculate_totals(self):
-        """Calculate totals."""
-        self.total = sum(row.amount or 0 for row in self.items)
+        self.total = sum(r.amount or 0 for r in self.items)
         self.grand_total = self.total - (self.discount_amount or 0)
-    
-    def get_customer_outstanding(self):
-        """Get customer outstanding with error handling."""
-        try:
-            result = frappe.db.sql("""
-                SELECT COALESCE(SUM(outstanding_amount), 0)
-                FROM `tabSales Invoice`
-                WHERE customer = %s AND docstatus = 1
-            """, self.customer)
-            return result[0][0] if result else 0
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "Outstanding calculation error")
-            return 0
-    
+
     def on_submit(self):
-        """Post-submit with error handling."""
         try:
             self.create_linked_records()
         except frappe.DuplicateEntryError:
             frappe.throw(_("Linked records already exist"))
-        except Exception as e:
-            frappe.log_error(frappe.get_traceback(), "Submit error")
-            frappe.throw(_("Error creating linked records: {0}").format(str(e)))
-    
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"Submit: {self.name}")
+            frappe.throw(_("Error creating linked records"))
+
     def create_linked_records(self):
-        """Create linked records."""
         pass
+```
+
+---
+
+## Example 6: Transaction Hooks [v15+]
+
+```python
+import frappe
+
+def create_with_side_effects(data):
+    """Use transaction hooks to coordinate DB changes with external systems."""
+
+    doc = frappe.get_doc({"doctype": "Sales Order", **data})
+    doc.insert()
+
+    # File will be created ONLY if DB commit succeeds
+    frappe.db.after_commit.add(
+        lambda: create_export_file(doc.name)
+    )
+
+    # Cleanup file if transaction rolls back
+    frappe.db.after_rollback.add(
+        lambda: remove_temp_file(doc.name)
+    )
+
+    return doc.name
+
+
+def create_export_file(name):
+    """Create export file — only called after successful commit."""
+    pass
+
+def remove_temp_file(name):
+    """Remove temp file — only called after rollback."""
+    pass
 ```
 
 ---
@@ -571,37 +421,33 @@ class CustomOrder(Document):
 if frappe.db.exists("Customer", name):
     doc = frappe.get_doc("Customer", name)
 
-# Catch DoesNotExistError
-try:
-    doc = frappe.get_doc("Customer", name)
-except frappe.DoesNotExistError:
-    frappe.throw(_("Customer not found"))
+# Handle None from get_value
+val = frappe.db.get_value("Customer", name, "credit_limit")
+val = val or 0  # Default if None
 
-# Handle duplicates on insert
+# Safe insert
 try:
     doc.insert()
 except frappe.DuplicateEntryError:
-    frappe.throw(_("Already exists"))
+    pass  # Handle duplicate
+except frappe.MandatoryError as e:
+    frappe.throw(_("Missing: {0}").format(e))
 
-# Handle link errors on delete
-try:
-    frappe.delete_doc("Customer", name)
-except frappe.LinkExistsError:
-    frappe.throw(_("Cannot delete - linked documents exist"))
-
-# Handle concurrent edits
+# Safe save
 try:
     doc.save()
 except frappe.TimestampMismatchError:
-    frappe.throw(_("Document modified. Please refresh."))
+    frappe.throw(_("Modified. Refresh and retry."))
 
-# Handle database errors
+# Safe delete
 try:
-    frappe.db.sql(query, values)
-except frappe.db.InternalError:
-    frappe.log_error(frappe.get_traceback(), "DB Error")
-    frappe.throw(_("Database error"))
+    frappe.delete_doc("Customer", name)
+except frappe.LinkExistsError:
+    frappe.throw(_("Linked documents exist"))
 
-# Background job - always commit
+# Safe query — ALWAYS use %(name)s format
+frappe.db.sql("SELECT * FROM `tabItem` WHERE name = %(n)s", {"n": name})
+
+# Background job — ALWAYS commit
 frappe.db.commit()
 ```
