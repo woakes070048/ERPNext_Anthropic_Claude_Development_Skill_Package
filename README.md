@@ -116,6 +116,23 @@ See [`WAY_OF_WORK.md`](WAY_OF_WORK.md) for the methodology we used to build thes
 
 ---
 
+## Companion Skills: Cross-Technology Integration
+
+This package covers ERPNext and Frappe as individual technologies. When you need to **bridge** ERPNext with BIM/IFC tools, install the companion cross-technology package:
+
+> **[Cross-Tech AEC Integration Skills](https://github.com/OpenAEC-Foundation/Cross-Tech-AEC-Claude-Skill-Package)** — 15 skills for technology boundaries
+
+Relevant cross-tech skills for ERPNext users:
+
+| Skill | Boundary | What it adds |
+|-------|----------|-------------|
+| `crosstech-impl-ifc-erpnext-costing` | IFC ↔ ERPNext | Extract IFC quantities → ERPNext BOMs, cost estimation pipeline |
+| `crosstech-impl-n8n-aec-pipeline` | n8n ↔ ERPNext API | Automate IFC→ERPNext workflows with n8n |
+| `crosstech-impl-docker-aec-stack` | Docker ↔ ERPNext | Containerized AEC stack with ERPNext integration |
+| `crosstech-core-ifc-schema-bridge` | IFC ↔ All formats | IFC quantity sets, property sets, schema mapping |
+
+---
+
 ## 📄 License
 
 MIT — See [LICENSE.md](LICENSE.md) for details.
