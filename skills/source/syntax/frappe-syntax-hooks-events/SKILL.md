@@ -4,7 +4,7 @@ description: >
   Use when implementing document lifecycle hooks via doc_events in hooks.py, understanding event execution order, or extending/overriding document behavior from another app.
   Prevents silent hook failures from wrong event names, incorrect execution order assumptions, and broken override chains.
   Covers doc_events hook syntax, all document events (before_insert, validate, on_submit, etc.), event execution order, extend vs override behavior, cross-app doc_events.
-  Keywords: doc_events, hooks.py, before_insert, validate, on_submit, on_cancel, lifecycle, document events, override, extend.
+  Keywords: doc_events, hooks.py, before_insert, validate, on_submit, on_cancel, lifecycle, document events, override, extend, event order, which event fires when, before_save vs validate, document event list..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

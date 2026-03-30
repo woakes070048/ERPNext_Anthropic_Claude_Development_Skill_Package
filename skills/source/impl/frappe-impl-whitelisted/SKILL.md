@@ -6,7 +6,7 @@ description: >
   integration, file uploads, background jobs, rate limiting, REST API
   testing, and migration from Server Scripts to whitelisted methods.
   Prevents permission bypasses, SQL injection, and data exposure.
-  Keywords: how to create API, build REST endpoint, frappe.call,
+  Keywords: how to create API, build REST endpoint, frappe.call,, create API endpoint, call from frontend, custom API, REST endpoint, how to call python from JS.
   frappe.whitelist, API permission, guest API, secure endpoint,
   rate limiting, curl testing, frm.call.
 license: MIT

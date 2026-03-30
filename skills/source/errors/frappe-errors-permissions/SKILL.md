@@ -9,7 +9,7 @@ description: >
   not applying, permission_query_conditions breaking get_list, owner-based
   permissions confusion, Apply User Permission checkbox behavior, and the
   permission debug workflow using frappe.permissions.get_doc_permissions.
-  Keywords: PermissionError, has_permission, permission_query_conditions,
+  Keywords: PermissionError, has_permission, permission_query_conditions,, permission denied, cannot access, user blocked, sharing not working, role not enough.
   User Permission, perm_level, sharing, guest access, owner permission.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

@@ -5,7 +5,8 @@ description: >
   Covers lifecycle hooks (validate, on_update, on_submit), controller
   override, submittable documents, autoname patterns, UUID naming (v16),
   and the flags system. Keywords: document controller, lifecycle hook,
-  validate, on_update, on_submit, autoname, naming series, flags, v14-v16.
+  validate, on_update, on_submit, autoname, naming series, flags, v14-v16,
+  controller example, lifecycle hook order, when to use validate, Python DocType class.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

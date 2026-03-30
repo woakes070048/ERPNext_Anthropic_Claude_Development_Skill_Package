@@ -7,7 +7,7 @@ description: >
   QueryTimeoutError, SQL injection errors, frappe.db.sql parameter format
   (% vs %s), get_value returning None, transaction deadlocks, MariaDB gone
   away, too many connections. Error-to-fix mapping for v14/v15/v16.
-  Keywords: database error, DuplicateEntryError, TimestampMismatchError,
+  Keywords: database error, DuplicateEntryError, TimestampMismatchError,, MariaDB error, MySQL error, column not found, table missing, duplicate entry, database crash.
   SQL injection, deadlock, MariaDB gone away, query timeout.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

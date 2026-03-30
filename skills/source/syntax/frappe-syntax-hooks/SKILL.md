@@ -5,7 +5,8 @@ description: >
   document events, fixtures, boot session, jenv customization, or website
   routing. Covers v14/v15/v16 including extend_doctype_class. Keywords:
   hooks.py, doc_events, scheduler_events, fixtures, app_include_js,
-  override_whitelisted_methods, extend_doctype_class.
+  override_whitelisted_methods, extend_doctype_class,
+  hooks.py example, how to register hook, available hooks list, extend_doctype_class example.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

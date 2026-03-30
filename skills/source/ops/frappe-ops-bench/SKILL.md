@@ -4,7 +4,7 @@ description: >
   Use when running bench commands, managing sites, configuring multi-tenancy, or setting up domains.
   Prevents misconfigured bench environments, broken site routing, and DNS mismatches.
   Covers bench CLI commands, site creation, bench init, multi-tenancy setup, DNS-based routing, common-site-config.
-  Keywords: bench, site, multi-tenancy, domains, bench init, bench new-site, bench setup, common_site_config.
+  Keywords: bench, site, multi-tenancy, domains, bench init, bench new-site, bench setup, common_site_config, bench command not working, site setup, multi-tenant, domain routing, new site..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

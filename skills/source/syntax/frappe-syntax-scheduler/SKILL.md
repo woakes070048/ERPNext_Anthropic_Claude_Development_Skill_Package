@@ -5,7 +5,8 @@ description: >
   v14/v15/v16. Covers scheduler_events in hooks.py, frappe.enqueue() for
   async jobs, queue configuration, job deduplication, error handling, and
   monitoring. Keywords: scheduler, background job, cron, RQ worker, job
-  queue, async task, frappe.enqueue, scheduled task.
+  queue, async task, frappe.enqueue, scheduled task,
+  cron syntax, how often does it run, background job example, enqueue example.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

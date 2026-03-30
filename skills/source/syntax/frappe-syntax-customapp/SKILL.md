@@ -5,7 +5,8 @@ description: >
   pyproject.toml configuration, module creation, patches, and fixtures
   for v14/v15/v16. Prevents common mistakes with app scaffolding and
   module organization. Keywords: custom app, bench new-app, pyproject.toml,
-  patches, fixtures, modules, app structure.
+  patches, fixtures, modules, app structure,
+  app boilerplate, bench new-app example, module setup, patch example.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

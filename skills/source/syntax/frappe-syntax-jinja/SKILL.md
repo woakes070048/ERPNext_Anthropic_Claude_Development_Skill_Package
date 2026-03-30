@@ -5,7 +5,8 @@ description: >
   Templates, and Portal Pages. Covers template syntax, context variables,
   filters, macros, and v16 Chrome PDF rendering. Prevents common mistakes
   with doc context and child table iteration. Keywords: Jinja, print format,
-  email template, portal page, template syntax, PDF, v14-v16.
+  email template, portal page, template syntax, PDF, v14-v16,
+  template syntax, Jinja example, print format code, how to show child table in print.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

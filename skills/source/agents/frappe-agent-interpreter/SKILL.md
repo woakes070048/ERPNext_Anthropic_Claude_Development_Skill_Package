@@ -6,7 +6,8 @@ description: >
   auto-calculate' or 'add approval workflow' into concrete technical
   specifications. Determines which Frappe mechanisms to use and maps to
   the full 60-skill catalog. Keywords: vague requirement, clarify scope,
-  translate business need, technical spec, implementation plan.
+  translate business need, technical spec, implementation plan,
+  what does this mean, unclear requirement, translate to code, how to build this.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

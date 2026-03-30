@@ -6,7 +6,7 @@ description: >
   frappe.log_error() for Error Log DocType entries, request logging,
   Sentry integration, and production logging patterns. Prevents common
   mistakes with print(), swapped log_error arguments, and sensitive data.
-  Keywords: frappe.logger, log_error, Error Log, logging, Sentry,
+  Keywords: frappe.logger, log_error, Error Log, logging, Sentry,, where are the logs, how to log errors, error tracking, print not showing, production logs.
   monitor, request logging, error tracking, debug, production.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

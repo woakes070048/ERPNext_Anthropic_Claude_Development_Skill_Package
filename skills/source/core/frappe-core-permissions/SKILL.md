@@ -4,7 +4,7 @@ description: >
   Use when implementing the Frappe/ERPNext permission system. Covers roles,
   user permissions, perm levels, data masking, and permission hooks for
   v14/v15/v16. Prevents common access control mistakes and security issues.
-  Keywords: permissions, roles, user permissions, perm levels, data masking,
+  Keywords: permissions, roles, user permissions, perm levels, data masking,, restrict records, who can see what, department access, row-level, user cannot see document, access denied.
   access control, security, has_permission.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

@@ -6,7 +6,7 @@ description: >
   sandbox violations, doc_events not firing, wrong script type selection,
   SQL injection, permission denied in scheduled scripts, infinite loops,
   and API scripts not returning JSON. Covers error message mapping table.
-  Keywords: server script error, ImportError, NameError, sandbox,
+  Keywords: server script error, ImportError, NameError, sandbox,, ImportError in server script, script not running, sandbox error, restricted function.
   restricted, frappe.throw, doc_events, scheduler, API script, SQL injection.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

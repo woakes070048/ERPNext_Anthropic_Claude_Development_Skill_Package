@@ -7,7 +7,7 @@ description: >
   PO/MO files [v15+], RTL support, and custom app translations.
   Prevents common mistakes with f-strings, concatenation, and template
   literals that break string extraction.
-  Keywords: translation, i18n, _(), __(), _lt(), CSV, PO, gettext,
+  Keywords: translation, i18n, _(), __(), _lt(), CSV, PO, gettext,, translate my app, multi-language, text not translated, wrong language, how to add translation.
   bench get-untranslated, RTL, localization.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

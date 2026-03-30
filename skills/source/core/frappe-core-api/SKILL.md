@@ -4,7 +4,7 @@ description: >
   Use when building ERPNext/Frappe API integrations (v14/v15/v16) including
   REST API, RPC API, authentication, webhooks, and rate limiting. Covers
   external API calls, endpoint design, token/OAuth2/session authentication.
-  Keywords: API integration, REST endpoint, webhook, token authentication,
+  Keywords: API integration, REST endpoint, webhook, token authentication,, how to connect, external API, send data to another system, API not working, 401 error.
   OAuth, frappe.call, external connection, rate limiting.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

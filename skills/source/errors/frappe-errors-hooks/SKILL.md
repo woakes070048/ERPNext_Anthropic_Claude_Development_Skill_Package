@@ -7,7 +7,7 @@ description: >
   permission_query_conditions SQL errors, override_doctype_class import
   failures, extend_doctype_class [v16+] conflicts, fixtures not loading.
   Error diagnosis by hook type for v14/v15/v16.
-  Keywords: hooks.py error, hook not firing, scheduler not running,
+  Keywords: hooks.py error, hook not firing, scheduler not running,, hook not working, scheduler not running, app_include not loading, override not applied.
   doc_events error, circular import, fixtures error, override class error.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

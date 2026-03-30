@@ -4,7 +4,7 @@ description: >
   Use when deploying Frappe/ERPNext to production, configuring Nginx or Supervisor, setting up Docker, enabling SSL, or hardening security.
   Prevents insecure deployments, missing reverse proxy config, and broken process management.
   Covers production setup, Nginx configuration, Supervisor/systemd, Docker Compose, Let's Encrypt SSL, firewall rules, security hardening.
-  Keywords: deployment, production, nginx, supervisor, docker, ssl, letsencrypt, security, gunicorn, systemd.
+  Keywords: deployment, production, nginx, supervisor, docker, ssl, letsencrypt, security, gunicorn, systemd, go live, production setup, HTTPS setup, server config, deploy to VPS, Docker setup..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

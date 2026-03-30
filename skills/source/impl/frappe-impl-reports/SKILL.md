@@ -4,7 +4,7 @@ description: >
   Use when building Script Reports, Query Reports, dashboard charts, or Number Cards in ERPNext.
   Prevents empty report output from wrong column definitions, broken filters, and unoptimized SQL in large datasets.
   Covers Report Builder, Script Report (Python + JS), Query Report, Report filters, dashboard Chart DocType, Number Card, report permissions.
-  Keywords: report, Script Report, Query Report, dashboard, chart, Number Card, filters, columns, execute, get_data.
+  Keywords: report, Script Report, Query Report, dashboard, chart, Number Card, filters, columns, execute, get_data, create report, custom report, dashboard chart, report empty, no data showing..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

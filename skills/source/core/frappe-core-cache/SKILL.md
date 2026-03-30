@@ -4,7 +4,7 @@ description: >
   Use when implementing Redis caching, cache invalidation, or distributed locking in Frappe.
   Prevents stale cache bugs, race conditions from missing locks, and memory bloat from unbounded cache keys.
   Covers frappe.cache(), @redis_cache decorator, cache.get_value/set_value, cache invalidation patterns, frappe.lock, TTL strategies.
-  Keywords: cache, Redis, redis_cache, invalidation, locking, frappe.cache, get_value, set_value, TTL, distributed lock.
+  Keywords: cache, Redis, redis_cache, invalidation, locking, frappe.cache, get_value, set_value, TTL, distributed lock, data not refreshing, stale data, cache not clearing, Redis error, slow repeated queries..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

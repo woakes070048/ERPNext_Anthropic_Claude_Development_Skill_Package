@@ -5,7 +5,8 @@ description: >
   field manipulation, server calls, or child table handling in v14/v15/v16.
   Covers exact syntax for frappe.ui.form.on, frm methods, frappe.call,
   and browser-side validation. Keywords: client script, form event, frm,
-  frappe.call, frappe.ui.form.on, JavaScript, UI interaction, field validation.
+  frappe.call, frappe.ui.form.on, JavaScript, UI interaction, field validation,
+  form event syntax, how to write client script, frm example, frappe.call example.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

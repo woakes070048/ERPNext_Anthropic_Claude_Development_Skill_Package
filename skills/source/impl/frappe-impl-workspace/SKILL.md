@@ -6,7 +6,7 @@ description: >
   charts, custom HTML blocks, JSON content format, shipping workspaces
   with custom apps, and role-based access control.
   Prevents common mistakes with content/child-table desync and missing fixtures.
-  Keywords: workspace, desk, dashboard, number card, chart, shortcut,
+  Keywords: workspace, desk, dashboard, number card, chart, shortcut,, customize desk, dashboard setup, add shortcut, module page, sidebar customize.
   workspace builder, module, fixtures, sidebar.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

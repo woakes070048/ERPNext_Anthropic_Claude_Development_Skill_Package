@@ -6,7 +6,8 @@ description: >
   Prevents the #1 AI mistake: using import statements in Server Scripts
   (sandbox blocks ALL imports). Covers frappe.* methods, event name mapping,
   and correct v14/v15/v16 syntax. Keywords: Server Script, frappe, ERPNext,
-  sandbox, import, doc event, validate, on_submit, before_save.
+  sandbox, import, doc event, validate, on_submit, before_save,
+  server script example, import not allowed, sandbox rules, which script type to use.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

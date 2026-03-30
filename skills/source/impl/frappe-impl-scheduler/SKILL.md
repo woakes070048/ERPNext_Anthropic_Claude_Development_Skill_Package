@@ -7,7 +7,8 @@ description: >
   monitoring via Scheduled Job Log and RQ Dashboard, error handling,
   long-running job patterns, email digest, data cleanup, and report
   generation. Keywords: schedule task, background job, cron job, async
-  processing, queue selection, job deduplication, scheduler implementation.
+  processing, queue selection, job deduplication, scheduler implementation,
+  run task automatically, background process, scheduled task not running, async task.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

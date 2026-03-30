@@ -4,7 +4,7 @@ description: >
   Use when implementing document Workflows, approval chains, or state-based transitions in Frappe.
   Prevents stuck documents from missing transitions, broken approval chains, and permission errors on workflow actions.
   Covers Workflow DocType, Workflow State, Workflow Action, transition rules, allowed roles, conditions, workflow_state field, apply_workflow.
-  Keywords: workflow, approval, transition, Workflow State, Workflow Action, state machine, approval chain, workflow_state.
+  Keywords: workflow, approval, transition, Workflow State, Workflow Action, state machine, approval chain, workflow_state, approval chain, document approval, multi-step approval, workflow stuck, status transitions..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

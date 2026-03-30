@@ -9,7 +9,7 @@ description: >
   Error, CORS issues, CSRF token missing/invalid, rate limit exceeded (429),
   file upload failures, JSON parse errors in request/response, webhook delivery
   failures, and timeout on long operations.
-  Keywords: API error, 401, 403, 404, 417, 429, 500, CSRF, CORS, REST,
+  Keywords: API error, 401, 403, 404, 417, 429, 500, CSRF, CORS, REST,, API call fails, 403 forbidden, CORS error, token expired, endpoint not found, webhook not received.
   whitelist, webhook, rate limit, file upload, authentication token.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

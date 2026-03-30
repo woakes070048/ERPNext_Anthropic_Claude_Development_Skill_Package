@@ -5,7 +5,8 @@ description: >
   frappe.db methods, ORM patterns (frappe.get_doc, frappe.get_list), raw SQL,
   caching patterns, and performance optimization. Prevents common mistakes
   with database transactions and query building. Keywords: frappe.db,
-  frappe.get_doc, database query, SQL, ORM, caching, database performance.
+  frappe.get_doc, database query, SQL, ORM, caching, database performance,
+  query returns nothing, slow database, how to fetch data, get document by name, frappe.get_list empty.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

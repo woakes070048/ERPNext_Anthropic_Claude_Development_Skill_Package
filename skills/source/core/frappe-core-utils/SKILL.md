@@ -5,7 +5,7 @@ description: >
   frappe.utils.* for date/time, number/money, string, validation, and
   file path operations. Prevents reinventing stdlib alternatives that
   break timezone awareness, locale formatting, or multi-tenancy.
-  Keywords: frappe.utils, nowdate, flt, cint, fmt_money, getdate,
+  Keywords: frappe.utils, nowdate, flt, cint, fmt_money, getdate,, date calculation, format number, money format, validate email, how to calculate days between.
   add_days, date_diff, validate_email, pretty_date, get_files_path.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."

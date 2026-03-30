@@ -7,7 +7,8 @@ description: >
   clear-cache), testing, packaging, installing on another site, version
   management, and app dependencies for v14/v15/v16. Keywords: create custom
   app, new frappe app, bench new-app, app structure, module creation,
-  doctype creation, fixtures, patches, deployment, packaging.
+  doctype creation, fixtures, patches, deployment, packaging,
+  data migration, patch file, patches.txt, migrate data between DocTypes, create new app from scratch.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

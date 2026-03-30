@@ -4,7 +4,7 @@ description: >
   Use when building Query Reports, Script Reports, or configuring Report Builder, including chart data integration.
   Prevents report errors from wrong column definitions, missing permissions, and incorrect data formatting.
   Covers Query Report (SQL-based), Script Report (Python-based), Report Builder, report columns definition, filters, chart_data, report permissions, prepared_report.
-  Keywords: Query Report, Script Report, Report Builder, report columns, filters, chart_data, frappe.query_report, prepared_report.
+  Keywords: Query Report, Script Report, Report Builder, report columns, filters, chart_data, frappe.query_report, prepared_report, report columns, how to build report, report not showing data, chart in report..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

@@ -6,7 +6,8 @@ description: >
   permission queries. Covers sandbox-safe coding, script type selection,
   testing, migration to controllers. Keywords: how to implement server
   script, which script type, sandbox limitation, Document Event, API
-  script, Scheduler Event, Permission Query, migrate to controller.
+  script, Scheduler Event, Permission Query, migrate to controller,
+  no-code automation, run code on save, auto-fill field, server-side validation, scheduled script.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

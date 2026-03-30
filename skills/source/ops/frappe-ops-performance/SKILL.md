@@ -4,7 +4,7 @@ description: >
   Use when tuning MariaDB, configuring Redis memory, sizing Gunicorn workers, setting up CDN, or profiling slow queries.
   Prevents performance bottlenecks from default configurations, memory exhaustion, and unoptimized database queries.
   Covers MariaDB tuning, Redis configuration, Gunicorn worker sizing, CDN setup, slow query log analysis, Python profiling, request profiling.
-  Keywords: performance, MariaDB, Redis, Gunicorn, CDN, slow query, profiling, tuning, optimization, workers.
+  Keywords: performance, MariaDB, Redis, Gunicorn, CDN, slow query, profiling, tuning, optimization, workers, slow page, loading time, ERPNext slow, why is it slow, page takes long, timeout..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

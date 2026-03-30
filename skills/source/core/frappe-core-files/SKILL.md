@@ -4,7 +4,7 @@ description: >
   Use when handling file uploads, attachments, private/public file access, or S3 storage configuration.
   Prevents broken file URLs, permission leaks on private files, and failed uploads from incorrect MIME handling.
   Covers File DocType, frappe.get_file, upload API, private vs public directories, S3 integration, file URL patterns, attach field types.
-  Keywords: file, upload, attachment, File DocType, private, public, S3, file_url, get_file, attach.
+  Keywords: file, upload, attachment, File DocType, private, public, S3, file_url, get_file, attach, upload not working, file missing, broken file link, download file, image not showing, attachment error..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

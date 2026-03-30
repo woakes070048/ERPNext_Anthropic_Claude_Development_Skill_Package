@@ -6,7 +6,7 @@ description: >
   methods. Covers template creation workflows, child table handling,
   conditional sections, styling, multi-language support, and debugging.
   Prevents N+1 queries, wrong formatting, and Report Print confusion.
-  Keywords: create print format, email template, portal page, pdf
+  Keywords: create print format, email template, portal page, pdf, create print format, invoice template, email template, PDF layout, custom print.
   template, invoice template, jinja methods, notification template,
   web page template, print format styling.
 license: MIT

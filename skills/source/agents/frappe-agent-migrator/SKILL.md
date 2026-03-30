@@ -4,7 +4,7 @@ description: >
   Use when migrating a Frappe app between major versions, detecting breaking API changes, or resolving post-migration errors.
   Prevents failed migrations from undetected deprecated APIs, removed methods, and changed function signatures.
   Covers breaking change detection v14-v15-v16, deprecated API mapping, migration checklist, common migration errors, automatic fix suggestions.
-  Keywords: migration, version upgrade, breaking changes, deprecated API, v14, v15, v16, migrate, compatibility.
+  Keywords: migration, version upgrade, breaking changes, deprecated API, v14, v15, v16, migrate, compatibility, upgrade ERPNext, version change breaks, after update errors, deprecated method..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

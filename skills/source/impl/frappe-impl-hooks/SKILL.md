@@ -6,7 +6,7 @@ description: >
   override/extend_doctype_class, permission hooks, extend_bootinfo,
   fixtures, asset injection, website hooks, and doctype_js.
   Prevents broken transactions, missed migrations, and multi-app conflicts.
-  Keywords: hooks.py, doc_events, scheduler_events, override doctype,
+  Keywords: hooks.py, doc_events, scheduler_events, override doctype,, how to add hook, when to use doc_events, scheduler setup, override existing behavior.
   extend doctype class, permission hook, scheduler job, fixtures,
   doctype_js, extend_bootinfo, website hooks.
 license: MIT

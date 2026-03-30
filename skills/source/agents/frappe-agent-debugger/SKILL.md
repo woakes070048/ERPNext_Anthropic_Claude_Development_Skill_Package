@@ -4,7 +4,7 @@ description: >
   Use when debugging Frappe errors, using bench console for live inspection, analyzing tracebacks, or reading Frappe log files.
   Prevents wasted debugging time from ignoring log context, misreading tracebacks, and not using bench console effectively.
   Covers bench console, frappe.logger, error log DocType, traceback analysis, common error patterns, log file locations, pdb/debugger integration, VS Code DAP, profiling, Frappe Recorder, mariadb diagnostics.
-  Keywords: debug, bench console, traceback, error log, frappe.logger, pdb, debugging, log analysis, inspect, VS Code, DAP, profiling, recorder, mariadb, monitor.
+  Keywords: debug, bench console, traceback, error log, frappe.logger, pdb, debugging, log analysis, inspect, VS Code, DAP, profiling, recorder, mariadb, monitor, ERPNext error, how to debug, find the bug, what went wrong, stack trace, error message..
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

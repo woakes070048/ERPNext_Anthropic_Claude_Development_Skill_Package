@@ -7,7 +7,8 @@ description: >
   migration from hooks.py and Server Scripts. Keywords: how to implement
   controller, which hook to use, validate vs on_update, override controller,
   submittable document, autoname, flags, extend_doctype_class, controller
-  testing, child table controller.
+  testing, child table controller,
+  which hook to use, when does validate run, how to override save, document lifecycle.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

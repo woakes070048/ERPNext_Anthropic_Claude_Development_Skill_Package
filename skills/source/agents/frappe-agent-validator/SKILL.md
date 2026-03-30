@@ -6,7 +6,8 @@ description: >
   validates against all 60 frappe-* skills, catches v16 patterns
   (extend_doctype_class, type annotations), validates ops patterns (bench
   commands, deployment), and generates correction reports. Keywords: review
-  code, check script, validate deployment, find bugs, code quality.
+  code, check script, validate deployment, find bugs, code quality,
+  check my code, is this correct, code review, before deploying, best practices check.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
 metadata:

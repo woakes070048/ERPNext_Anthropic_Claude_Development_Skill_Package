@@ -6,7 +6,7 @@ description: >
   wrong lifecycle hook choice, get_list permission errors, NestedSet errors,
   extend_doctype_class conflicts, missing super() calls, and recursion without
   flags. Covers error diagnosis by lifecycle phase for v14/v15/v16.
-  Keywords: controller error, autoname, validate loop, on_submit, is_submittable,
+  Keywords: controller error, autoname, validate loop, on_submit, is_submittable,, save fails, validate error, on_submit not working, autoname broken, controller crash.
   get_list, NestedSet, extend_doctype_class, super, flags, recursion guard.
 license: MIT
 compatibility: "Claude Code, Claude.ai Projects, Claude API. Frappe v14-v16."
