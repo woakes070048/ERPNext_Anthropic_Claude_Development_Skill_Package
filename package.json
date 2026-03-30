@@ -1,6 +1,6 @@
 {
   "name": "@openaec/frappe-claude-skill-package",
-  "version": "1.0.0",
+  "version": "3.1.0",
   "description": "60 deterministic Claude AI skills for Frappe Framework & ERPNext v14-v16 development and operations",
   "license": "MIT",
   "repository": {
